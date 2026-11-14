@@ -15,6 +15,9 @@ o que fica aqui:
     do 25.u-net (a expansão em páginas fica em dsh_nowcast);
   - CLST_PAGES: as páginas que o dashboard roda em ciclo.
 
+2026.nov  mlabru  monitor de recepção lê $RSM_PATH/data/output/rsm_out.png (o
+                  nome que o 21.mrad gera e o dash_sync.sh traz), não mais
+                  $DASH_DATA/output/monrad.png; CS_RSM_PATH
 2026.out  mlabru  nowcast: uma página por radar (oflow + u-net), sai
                   CI_NOWCAST_RADARS_PER_PAGE; UNET_DATA com o padrão do
                   25.u-net (unet/data, não unet/data)
@@ -71,6 +74,9 @@ CS_GOES_DATA = os.getenv("GOES_DATA", f"{CS_STSC_DATA}/goes/data")
 CS_OFLOW_DATA = os.getenv("OFLOW_DATA", f"{CS_STSC_DATA}/oflw/data")
 # padrão = UNT_PATH do 25.u-net (/home/$USER/Public/unet) + data
 CS_UNET_DATA = os.getenv("UNET_DATA", f"{CS_STSC_DATA}/unet/data")
+# raiz do monitor de recepção (21.mrad): mesma variável e mesmo padrão do
+# rsm_cfg.sh dele e do dash_sync.sh, que traz o rsm_out.png para cá
+CS_RSM_PATH = os.getenv("RSM_PATH", f"/home/{CS_USER}/Public/mrad")
 
 # enquanto este arquivo existir, o dashboard fica em modo de alerta
 # prioritário (preso na página 0). O control pad cria/apaga o arquivo, então
@@ -122,7 +128,7 @@ CI_NOWCAST_MAX_AGE_HOURS = int(os.getenv("NOWCAST_MAX_AGE_HOURS", "2"))
 CLST_PAGES = [
     { "duration": 15, "name": "Monitor de Recepção de Dados",
       "tiles": [ ("Dados Radar",
-                 f"{CS_DASH_DATA}/output/monrad.png") ]
+                 f"{CS_RSM_PATH}/data/output/rsm_out.png") ]
     },
     { "duration": 15, "name": "Monitoramento de Raios",
       "tiles": [ ("Incidência de Raios (STSC)",

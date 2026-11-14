@@ -14,6 +14,8 @@
 # - GIFs de saída do 25.oflow e do 25.u-net -> OFLOW_DATA/output, UNET_DATA/output
 # - no_cast.* do 25.oflow -> OFLOW_DATA/assets (imagem de "indisponível")
 # - JSON e PNG do monrad -> RSM_PATH/data/{temp,output}
+# Raios (23.blitz, slm_*) e GOES (03.dat, goes1913.*) rodam NESTE host,
+# junto com os dashboards: não têm par aqui de propósito.
 #
 # workflow:
 # - lock de instância (flock); ocupado -> sai com 0
