@@ -149,16 +149,27 @@ test("createTile: rodapé indica indisponibilidade sem file_modified", () => {
 // loadConfig
 // ---------------------------------------------------------------------
 
+// substitui setTimeout/clearTimeout: os timers ficam em `scheduled` (o teste
+// decide quando rodar cada um) e clearTimeout só marca o timer como
+// `cancelled` (os testes que rodam tudo continuam rodando tudo)
 function withFakeSetTimeout(fn) {
     const scheduled = [];
-    const original = global.setTimeout;
+    const originalSet = global.setTimeout;
+    const originalClear = global.clearTimeout;
+
     global.setTimeout = (cb, ms) => {
-        scheduled.push({ cb, ms });
-        return 0;
+        scheduled.push({ cb, ms, cancelled: false });
+        return scheduled.length;  // id 1..n (0 = "sem timer")
+    };
+    global.clearTimeout = (id) => {
+        if (id && scheduled[id - 1]) {
+            scheduled[id - 1].cancelled = true;
+        }
     };
 
     return fn(scheduled).finally(() => {
-        global.setTimeout = original;
+        global.setTimeout = originalSet;
+        global.clearTimeout = originalClear;
     });
 }
 
@@ -440,4 +451,38 @@ test("pollState: sair do alerta com currentPage além do fim não trava a rotaç
     });
 
     assert.equal(document.getElementById("page-title").textContent, "P0");
+});
+
+test("showPage: duas trocas dentro do fade cancelam a primeira (título e tiles)", async () => {
+    const dash = loadApp();
+    const config = {
+        refresh_seconds: 30,
+        pages: [
+            { name: "P0", duration: 5, tiles: [{ type: "image", file: "r/p0.png", title: "T0" }] },
+            { name: "P1", duration: 5, tiles: [{ type: "image", file: "r/p1.png", title: "T1" }] },
+        ],
+    };
+
+    await withFakeSetTimeout(async (scheduled) => {
+        global.fetch = async () => ({ ok: true, json: async () => config });
+        await dash.loadConfig();
+        scheduled.length = 0;
+
+        dash.showPage(0);
+        dash.showPage(1);  // ex.: alerta logo após a rotação (< FADE_DURATION_MS)
+
+        const fades = scheduled.filter((t) => t.ms === 300);
+        assert.equal(fades.length, 4);  // título + tiles de cada showPage
+        assert.equal(fades.filter((t) => t.cancelled).length, 2);
+
+        // a ordem real dos timers: os da primeira troca vencem antes; se não
+        // fossem cancelados, escreveriam P0 e depois P1 (ou o contrário)
+        scheduled.filter((t) => !t.cancelled && t.ms === 300).forEach((t) => t.cb());
+        // a troca agendada pela primeira página também foi cancelada
+        assert.equal(scheduled.filter((t) => t.ms === 5000 && !t.cancelled).length, 1);
+    });
+
+    assert.equal(document.getElementById("page-title").textContent, "P1");
+    const html = document.getElementById("dashboard").innerHTML;
+    assert.ok(html.includes("T1") && !html.includes("T0"));
 });
