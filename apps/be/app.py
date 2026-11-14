@@ -42,6 +42,9 @@ MEDIA_MAX_AGE_HOURS, e as comuns com o desktop (dsc_env): CONFIG_FILE,
 STSC_DATA, OFLOW_DATA, UNET_DATA, NOWCAST_MAX_AGE_HOURS, OFL_NO_CAST_IMAGE,
 além das usadas nas raízes do config.json (BLITZ_DATA, GOES_DATA, RSM_PATH).
 
+2026.nov  mlabru  log dos radares de nowcast ocultos uma vez só entre os
+                  workers do gunicorn (arquivo de estado em data/run,
+                  ver _share_hidden_radars_state)
 2026.nov  mlabru  config e regra de nowcast unificadas com o desktop
                   (apps/dshcore): "media_dir" substituído por "roots" (raízes
                   por variável de ambiente), rota /media/<raiz>/<arquivo>
@@ -121,11 +124,38 @@ CS_MODIFIED_DATE_FORMAT = "%d/%m/%Y %H:%M"
 CS_NOWCAST_MEDIA_PREFIX = "nowcast/"
 CS_UNAVAILABLE_MEDIA = "_unavailable"
 
+# estado dos radares de nowcast ocultos, comum aos workers (ver
+# _share_hidden_radars_state); data/run é o diretório de PIDs do dsh_common.sh
+CS_HIDDEN_STATE_FILE = os.path.join(os.path.dirname(de.CS_APPS_DIR), "data", "run",
+                                    "nowcast_hidden.state")
+
 # < logging >--------------------------------------------------------------------------
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 M_LOG = logging.getLogger(__name__)
+
+# -------------------------------------------------------------------------------------
+def _share_hidden_radars_state() -> None:
+    """
+    no gunicorn cada worker é um processo e logava a mesma mudança dos
+    radares ocultos; com o arquivo de estado comum só um loga. O token é o
+    PID do pai (o mestre do gunicorn, o mesmo para todos os workers): depois
+    de reiniciar, o estado atual é logado de novo (o dash_web.sh recomeça o
+    log).
+    """
+    try:
+        os.makedirs(os.path.dirname(CS_HIDDEN_STATE_FILE), exist_ok=True)
+
+    except OSError as l_error:
+        M_LOG.warning("nowcast: sem diretório para o estado dos radares ocultos (%s): %s",
+                      CS_HIDDEN_STATE_FILE, l_error)
+        return
+
+    dn.set_hidden_state_file(CS_HIDDEN_STATE_FILE, str(os.getppid()))
+
+
+_share_hidden_radars_state()
 
 # < global state >---------------------------------------------------------------------
 

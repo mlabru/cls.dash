@@ -157,3 +157,99 @@ def test_hidden_set_change_is_logged_once(oflow_output, unet_output, caplog, mon
 def test_source_output_dir_unknown_source_is_none(oflow_output):
     assert dn.source_output_dir("xxx") is None
     assert dn.source_output_dir("unet") == str(oflow_output.parent.parent / "unet" / "output")
+
+
+# ---------------------------------------------------------------------------
+# log único entre processos (workers do gunicorn): set_hidden_state_file
+# ---------------------------------------------------------------------------
+
+CS_SRO_HIDDEN = "nowcast: radares ocultos (sem mosaico ou mais velho que 2h): SRO"
+
+
+def _hide_sro(oflow_output, unet_output):
+    (oflow_output / "SRO_400_now_mosaico.gif").unlink()
+    (unet_output / "SRO_400_now_mosaico.gif").unlink()
+
+
+def _as_new_process(monkeypatch):
+    # outro worker: mesmo arquivo e token, mas o próprio estado em memória
+    monkeypatch.setattr(dn, "G_HIDDEN_RADARS", set())
+
+
+def _logged(caplog):
+    return [r.getMessage() for r in caplog.records]
+
+
+def test_shared_state_file_logs_change_once_across_processes(oflow_output, unet_output,
+                                                             caplog, monkeypatch, tmp_path):
+    state = tmp_path / "hidden.state"
+    monkeypatch.setattr(dn, "G_HIDDEN_RADARS", set())
+    dn.set_hidden_state_file(str(state), "1234")
+    _hide_sro(oflow_output, unet_output)
+
+    with caplog.at_level("INFO", logger=dn.__name__):
+        for _ in range(4):  # gunicorn -w 4
+            _as_new_process(monkeypatch)
+            _pages(_entry())
+
+    assert _logged(caplog).count(CS_SRO_HIDDEN) == 1
+    assert state.read_text(encoding="utf-8") == "1234 SRO"
+
+
+def test_shared_state_file_logs_recovery_once(oflow_output, unet_output, caplog,
+                                              monkeypatch, tmp_path):
+    monkeypatch.setattr(dn, "G_HIDDEN_RADARS", {"SRO"})
+    state = tmp_path / "hidden.state"
+    state.write_text("1234 SRO", encoding="utf-8")
+    dn.set_hidden_state_file(str(state), "1234")
+
+    with caplog.at_level("INFO", logger=dn.__name__):
+        _pages(_entry())
+        monkeypatch.setattr(dn, "G_HIDDEN_RADARS", {"SRO"})  # outro worker
+        _pages(_entry())
+
+    assert _logged(caplog).count("nowcast: todos os radares com mosaico recente") == 1
+
+
+def test_state_from_previous_run_is_logged_again(oflow_output, unet_output, caplog,
+                                                 monkeypatch, tmp_path):
+    state = tmp_path / "hidden.state"
+    state.write_text("999 SRO", encoding="utf-8")  # gravado antes do reinício
+    monkeypatch.setattr(dn, "G_HIDDEN_RADARS", set())
+    dn.set_hidden_state_file(str(state), "1234")
+    _hide_sro(oflow_output, unet_output)
+
+    with caplog.at_level("WARNING", logger=dn.__name__):
+        _pages(_entry())
+
+    assert _logged(caplog) == [CS_SRO_HIDDEN]
+    assert state.read_text(encoding="utf-8") == "1234 SRO"
+
+
+def test_unwritable_state_file_still_logs(oflow_output, unet_output, caplog,
+                                          monkeypatch, tmp_path):
+    monkeypatch.setattr(dn, "G_HIDDEN_RADARS", set())
+    dn.set_hidden_state_file(str(tmp_path / "nao_existe" / "hidden.state"), "1234")
+    _hide_sro(oflow_output, unet_output)
+
+    with caplog.at_level("WARNING", logger=dn.__name__):
+        pages = _pages(_entry())
+
+    assert len(pages) == 6
+    assert CS_SRO_HIDDEN in _logged(caplog)
+    assert any("inacessível" in m for m in _logged(caplog))
+
+
+def test_without_state_file_each_process_logs(oflow_output, unet_output, caplog,
+                                              monkeypatch):
+    # desktop: um processo só, sem arquivo; o comportamento de antes
+    dn.set_hidden_state_file(None, "")
+    _hide_sro(oflow_output, unet_output)
+
+    with caplog.at_level("WARNING", logger=dn.__name__):
+        _as_new_process(monkeypatch)
+        _pages(_entry())
+        _as_new_process(monkeypatch)
+        _pages(_entry())
+
+    assert _logged(caplog).count(CS_SRO_HIDDEN) == 2

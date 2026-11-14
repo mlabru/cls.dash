@@ -14,7 +14,8 @@ nome do 25.u-net (os 3 backends de deep learning).
   - mosaico ausente ou mais velho que dsc_env.CI_NOWCAST_MAX_AGE_HOURS: a
     linha fica "indisponível" (título "...: sem atualização há mais de N h");
   - radar com as duas linhas assim fica oculto (log a cada mudança do
-    conjunto de ocultos);
+    conjunto de ocultos; com vários processos, como os workers do gunicorn,
+    ver set_hidden_state_file);
   - todos ocultos: uma página só, com um tile "indisponível";
   - nome da página com "(k/n)" quando há mais de uma;
   - os ocultos vão no "notice" de cada página gerada.
@@ -22,12 +23,16 @@ nome do 25.u-net (os 3 backends de deep learning).
 quem formata os tiles é cada app (build_pages recebe a função): o web faz
 um dict com a URL /media/nowcast/<origem>/<gif>, o desktop (título, caminho).
 
+2026.nov  mlabru  set_hidden_state_file: a mudança dos radares ocultos é
+                  logada uma vez só entre processos (cada worker do
+                  gunicorn logava a mesma mudança)
 2026.nov  mlabru  initial version: regra que estava duplicada em
                   apps/be/app.py e apps/dash/dsh_nowcast.py
 """
 # < imports >──────────────────────────────────────────────────────────────────────────
 
 # python library
+import fcntl
 import logging
 import os
 import re
@@ -61,6 +66,32 @@ M_LOG = logging.getLogger(__name__)
 # radares ocultos na última expansão: só loga quando o conjunto muda
 G_HIDDEN_RADARS = set()
 G_HIDDEN_RADARS_LOCK = threading.Lock()
+
+# estado compartilhado entre processos (ver set_hidden_state_file); None = só
+# o estado do processo (desktop)
+G_HIDDEN_STATE_FILE = None
+G_HIDDEN_STATE_TOKEN = None
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def set_hidden_state_file(fs_path, fs_token: str) -> None:
+    """
+    faz o log dos radares ocultos ser único entre os processos que usam o
+    mesmo arquivo: cada worker do gunicorn é um processo com o próprio
+    G_HIDDEN_RADARS e logava a mesma mudança (4 vezes com -w 4).
+
+    o arquivo guarda "<token> <siglas>"; quem vê a mudança primeiro grava e
+    loga, os outros acham o mesmo conteúdo e se calam. Um token diferente (o
+    do arquivo é de uma execução anterior) conta como estado desconhecido:
+    depois de reiniciar, o estado atual vai de novo para o log novo.
+
+    :param fs_path: arquivo de estado (None desliga, volta ao só-processo)
+    :param fs_token: identifica a execução, igual em todos os processos dela
+                     (o backend usa o PID do mestre do gunicorn)
+    """
+    global G_HIDDEN_STATE_FILE, G_HIDDEN_STATE_TOKEN
+
+    G_HIDDEN_STATE_FILE = fs_path
+    G_HIDDEN_STATE_TOKEN = str(fs_token)
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def build_pages(fdct_entry: dict, ff_now: float, ff_make_tile) -> list:
@@ -227,11 +258,52 @@ def _log_hidden_radars_change(fset_hidden: set) -> None:
         G_HIDDEN_RADARS.clear()
         G_HIDDEN_RADARS.update(fset_hidden)
 
+        if not _claim_hidden_change(fset_hidden):
+            return
+
     if fset_hidden:
         M_LOG.warning("nowcast: radares ocultos (sem mosaico ou mais velho que %dh): %s",
                       dsc_env.CI_NOWCAST_MAX_AGE_HOURS, ", ".join(sorted(fset_hidden)))
 
     else:
         M_LOG.info("nowcast: todos os radares com mosaico recente")
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _claim_hidden_change(fset_hidden: set) -> bool:
+    """
+    registra a mudança no arquivo de estado (se houver, ver
+    set_hidden_state_file), com flock para dois workers não lerem o mesmo
+    conteúdo antigo ao mesmo tempo.
+
+    :param fset_hidden: siglas dos radares ocultos agora
+    :returns: True se este processo deve logar a mudança (sem arquivo, ou
+              outro processo ainda não a gravou); em erro de E/S também
+              True: um log repetido é melhor que nenhum
+    """
+    if G_HIDDEN_STATE_FILE is None:
+        return True
+
+    ls_state = f"{G_HIDDEN_STATE_TOKEN} {','.join(sorted(fset_hidden))}"
+
+    try:
+        with open(G_HIDDEN_STATE_FILE, "a+", encoding="utf-8") as l_file:
+            fcntl.flock(l_file, fcntl.LOCK_EX)
+
+            l_file.seek(0)
+
+            if l_file.read() == ls_state:
+                return False
+
+            l_file.seek(0)
+            l_file.truncate()
+            l_file.write(ls_state)
+
+            return True
+
+    except OSError as l_error:
+        M_LOG.warning("nowcast: estado dos radares ocultos (%s) inacessível: %s",
+                      G_HIDDEN_STATE_FILE, l_error)
+
+        return True
 
 # < the end >──────────────────────────────────────────────────────────────────────────

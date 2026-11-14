@@ -15,6 +15,7 @@ import pytest
 import app as be_app
 from dshcore import dsc_config as dc
 from dshcore import dsc_env as de
+from dshcore import dsc_nowcast as dn
 
 
 # ---------------------------------------------------------------------------
@@ -27,9 +28,13 @@ CLST_RADARS = [["BEL", "Belém"], ["BVA", "Boa Vista"], ["CGU", "Canguçu"],
 
 
 @pytest.fixture(autouse=True)
-def fresh_cache(monkeypatch):
-    # cada teste começa como um worker novo: cache vazio
+def fresh_cache(monkeypatch, tmp_path):
+    # cada teste começa como um worker novo: cache vazio; e o estado dos
+    # radares ocultos fora do data/run real (o backend em execução usa ele)
     monkeypatch.setattr(be_app, "G_CONFIG_CACHE", dc.CConfigCache())
+    monkeypatch.setattr(dn, "G_HIDDEN_STATE_FILE", str(tmp_path / "hidden.state"))
+    monkeypatch.setattr(dn, "G_HIDDEN_RADARS", set())
+    monkeypatch.setattr(dn, "G_HIDDEN_STATE_TOKEN", "teste")
 
 
 @pytest.fixture
@@ -400,3 +405,22 @@ def test_real_config_json_is_valid():
 
     assert set(config["roots"]) == {"mrad", "blitz", "goes"}
     assert all(os.path.isabs(d) for d in config["roots"].values())
+
+
+# ---------------------------------------------------------------------------
+# estado dos radares ocultos comum aos workers
+# ---------------------------------------------------------------------------
+
+def test_import_points_hidden_state_at_data_run_with_parent_pid(monkeypatch, tmp_path):
+    state = tmp_path / "run" / "nowcast_hidden.state"
+    monkeypatch.setattr(be_app, "CS_HIDDEN_STATE_FILE", str(state))
+
+    be_app._share_hidden_radars_state()
+
+    assert dn.G_HIDDEN_STATE_FILE == str(state)
+    assert dn.G_HIDDEN_STATE_TOKEN == str(os.getppid())
+    assert state.parent.is_dir()
+
+
+def test_hidden_state_file_default_is_under_repo_data_run():
+    assert be_app.CS_HIDDEN_STATE_FILE.endswith(os.path.join("data", "run", "nowcast_hidden.state"))
