@@ -18,6 +18,17 @@ def _touch(path, content=b"data"):
     return str(path)
 
 
+# GIF 1x1 válido: os tiles agora recusam mídia que não decodifica
+CB_GIF_1X1 = (b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff"
+              b"!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00"
+              b"\x00\x02\x02D\x01\x00;")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_invalid_log(monkeypatch):
+    monkeypatch.setattr(wt, "G_INVALID_LOGGED", {})
+
+
 # ---------------------------------------------------------------------------
 # _find_existing_media_file
 # ---------------------------------------------------------------------------
@@ -84,7 +95,7 @@ def test_update_content_file_vanishing_before_getmtime_shows_placeholder(qapp, t
 
 def test_update_content_static_image_sets_title_and_caption(qapp, tmp_path):
     png = tmp_path / "img.png"
-    _touch(png)
+    _write_png(png)
 
     tile = wt.CTileWidget()
     tile.update_content("Radar", str(png))
@@ -108,7 +119,7 @@ def test_update_content_stops_previous_media_before_showing_new_one(qapp, tmp_pa
     mp4 = tmp_path / "clip.mp4"
     png = tmp_path / "img.png"
     _touch(mp4)
-    _touch(png)
+    _write_png(png)
 
     tile = wt.CTileWidget()
     tile.update_content("GOES", str(mp4))
@@ -122,7 +133,7 @@ def test_update_content_stops_previous_media_before_showing_new_one(qapp, tmp_pa
 
 def test_stop_playback_releases_gif_and_video(qapp, tmp_path):
     gif = tmp_path / "anim.gif"
-    _touch(gif)
+    _touch(gif, CB_GIF_1X1)
 
     tile = wt.CTileWidget()
     tile.update_content("Raios", str(gif))
@@ -164,3 +175,86 @@ def test_set_unavailable_image_with_missing_file_falls_back_to_text(qapp, tmp_pa
     tile.update_content("Radar", str(tmp_path / "missing.gif"))
 
     assert tile._lbl_image.text() == wt.CS_UNAVAILABLE_TEXT
+
+
+# ---------------------------------------------------------------------------
+# arquivo que existe mas não decodifica (vazio, corrompido)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name, content", [("vazio.png", b""), ("lixo.png", b"nao e png"),
+                                           ("vazio.gif", b""), ("lixo.gif", b"GIF89a truncado")])
+def test_invalid_image_or_gif_shows_unavailable_image(qapp, tmp_path, name, content):
+    wt.set_unavailable_image(_write_png(tmp_path / "no_cast.png"))
+
+    tile = wt.CTileWidget()
+    tile.update_content("Radar", _touch(tmp_path / name, content))
+
+    assert tile._lbl_image._content is wt.G_UNAVAILABLE_PIXMAP
+    assert tile._lbl_caption.text() == wt.CS_INVALID_CAPTION
+    assert tile._gif_movie is None
+    assert tile._lay_media.currentWidget() is tile._lbl_image
+
+
+def test_invalid_image_without_unavailable_image_shows_text(qapp, tmp_path):
+    tile = wt.CTileWidget()
+    tile.update_content("Radar", _touch(tmp_path / "vazio.png", b""))
+
+    assert tile._lbl_image.text() == wt.CS_UNAVAILABLE_TEXT
+    assert tile._lbl_caption.text() == wt.CS_INVALID_CAPTION
+
+
+def test_invalid_file_is_logged_once_per_version(qapp, tmp_path, caplog):
+    import os
+    png = _touch(tmp_path / "vazio.png", b"")
+    tile = wt.CTileWidget()
+
+    with caplog.at_level("WARNING", logger=wt.__name__):
+        tile.update_content("Radar", png)
+        tile.update_content("Radar", png)  # a página voltou na rotação
+
+        future = os.path.getmtime(png) + 5
+        os.utime(png, (future, future))   # o pipeline regravou, ainda vazio
+        tile.update_content("Radar", png)
+
+    assert [r.getMessage() for r in caplog.records] == [
+        f"mídia inválida ou vazia (0 bytes), mostrando indisponível: {png}"] * 2
+
+
+def test_valid_png_after_invalid_shows_image_and_date(qapp, tmp_path):
+    png = tmp_path / "img.png"
+    tile = wt.CTileWidget()
+
+    tile.update_content("Radar", _touch(png, b""))
+    tile.update_content("Radar", _write_png(png))
+
+    assert isinstance(tile._lbl_image._content, wt.QtGui.QPixmap)
+    assert not tile._lbl_image._content.isNull()
+    assert "Atualizado em" in tile._lbl_caption.text()
+
+
+def test_invalid_video_switches_to_unavailable_after_the_signal(qapp, tmp_path):
+    from PyQt5 import QtMultimedia
+    tile = wt.CTileWidget()
+    tile.update_content("GOES", _touch(tmp_path / "vazio.mp4", b""))
+    assert tile._lay_media.currentWidget() is tile._wid_video
+
+    tile._on_video_media_status(QtMultimedia.QMediaPlayer.InvalidMedia)
+    assert tile._video_player is not None  # ainda dentro do "slot": nada descartado
+
+    qapp.processEvents()
+
+    assert tile._video_player is None
+    assert tile._lay_media.currentWidget() is tile._lbl_image
+    assert tile._lbl_caption.text() == wt.CS_INVALID_CAPTION
+
+
+def test_invalid_video_status_after_page_change_is_ignored(qapp, tmp_path):
+    from PyQt5 import QtMultimedia
+    tile = wt.CTileWidget()
+    tile.update_content("GOES", _touch(tmp_path / "vazio.mp4", b""))
+
+    tile._on_video_media_status(QtMultimedia.QMediaPlayer.InvalidMedia)
+    tile.update_content("Radar", _write_png(tmp_path / "img.png"))  # trocou antes do timer
+    qapp.processEvents()
+
+    assert "Atualizado em" in tile._lbl_caption.text()

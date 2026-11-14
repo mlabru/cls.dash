@@ -23,9 +23,16 @@ fluxo (update_content):
      CT_FALLBACK_EXTENSIONS); sem arquivo, mostra a imagem de indisponível
      (set_unavailable_image; sem ela, o texto "Produto indisponível");
   2. para o que estava tocando (stop_playback);
-  3. exibe conforme a extensão: vídeo, GIF ou imagem;
+  3. exibe conforme a extensão: vídeo, GIF ou imagem; arquivo que não
+     decodifica (vazio, truncado, corrompido) também vira a imagem de
+     indisponível, com o rodapé CS_INVALID_CAPTION (o vídeo só se sabe
+     depois, pelo QMediaPlayer: InvalidMedia);
   4. faz um fade-in e escreve a data de modificação no rodapé.
 
+2026.nov  mlabru  arquivo vazio ou corrompido mostra a imagem de
+                  indisponível (antes o tile ficava em branco: um
+                  rsm_out.png de 0 bytes deixava a página vazia), com log
+                  uma vez por arquivo/mtime
 2026.out  mlabru  imagem de indisponível configurável
                   (set_unavailable_image: o no_cast.png do 25.oflow) e
                   rodapé "Arquivo não encontrado"
@@ -67,6 +74,9 @@ CS_UNAVAILABLE_TEXT = "❌ Produto indisponível"
 # rodapé do tile quando nenhum arquivo foi encontrado
 CS_NOT_FOUND_CAPTION = "Arquivo não encontrado"
 
+# rodapé do tile quando o arquivo existe mas não decodifica
+CS_INVALID_CAPTION = "Arquivo inválido ou vazio"
+
 # texto provisório do título e do rodapé, antes do primeiro conteúdo
 CS_PLACEHOLDER_TEXT = "───"
 
@@ -82,6 +92,10 @@ M_LOG = logging.getLogger(__name__)
 # imagem mostrada no lugar de um produto indisponível; None = só o texto
 # CS_UNAVAILABLE_TEXT. Definida uma vez pelo dashboard (set_unavailable_image)
 G_UNAVAILABLE_PIXMAP = None
+
+# {caminho: mtime} dos arquivos inválidos já logados: a página volta a cada
+# rotação, e o log é uma vez por versão do arquivo
+G_INVALID_LOGGED = {}
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def set_unavailable_image(fs_path: str):
@@ -144,6 +158,7 @@ class CTileWidget(QtWidgets.QWidget):
         # o que está tocando agora (no máximo um dos dois)
         self._gif_movie = None
         self._video_player = None
+        self._video_file = None
 
         self._lbl_title = _create_centered_label(CS_PLACEHOLDER_TEXT, "Title")
         self._lbl_caption = _create_centered_label(CS_PLACEHOLDER_TEXT, "Caption")
@@ -211,13 +226,18 @@ class CTileWidget(QtWidgets.QWidget):
         ls_lower_name = ls_media_file.lower()
 
         if ls_lower_name.endswith(".mp4"):
-            self._show_video(ls_media_file)
+            lb_shown = self._show_video(ls_media_file)
 
         elif ls_lower_name.endswith(".gif"):
-            self._show_gif(ls_media_file)
+            lb_shown = self._show_gif(ls_media_file)
 
         else:
-            self._show_static_image(ls_media_file)
+            lb_shown = self._show_static_image(ls_media_file)
+
+        if not lb_shown:
+            _log_invalid_once(ls_media_file, lf_modified_timestamp)
+            self._show_unavailable(CS_INVALID_CAPTION)
+            return
 
         self._fade_animation.stop()
         self._fade_animation.start()
@@ -240,10 +260,12 @@ class CTileWidget(QtWidgets.QWidget):
             self._video_player = None
 
     # ─────────────────────────────────────────────────────────────────────────────────
-    def _show_unavailable(self):
+    def _show_unavailable(self, fs_caption: str = CS_NOT_FOUND_CAPTION):
         """
         mostra a imagem de indisponível (ou, sem ela, o texto) no lugar da
         mídia, e avisa no rodapé.
+
+        :param fs_caption: texto do rodapé (não encontrado ou inválido)
         """
         self.stop_playback()
 
@@ -254,31 +276,51 @@ class CTileWidget(QtWidgets.QWidget):
             self._lbl_image.set_content(G_UNAVAILABLE_PIXMAP)
 
         self._lay_media.setCurrentWidget(self._lbl_image)
-        self._lbl_caption.setText(CS_NOT_FOUND_CAPTION)
+        self._lbl_caption.setText(fs_caption)
 
     # ─────────────────────────────────────────────────────────────────────────────────
-    def _show_video(self, fs_file: str):
+    def _show_video(self, fs_file: str) -> bool:
         """
-        toca um MP4 mudo e em loop.
+        toca um MP4 mudo e em loop. Se ele não decodificar, o QMediaPlayer só
+        avisa depois (InvalidMedia, ver _on_video_media_status).
 
         :param fs_file: caminho do arquivo .mp4 (já verificado que existe)
+        :returns: True (a validade do vídeo não é conhecida aqui)
         """
         self._video_player = QtMultimedia.QMediaPlayer(None, QtMultimedia.QMediaPlayer.VideoSurface)
         self._video_player.setVideoOutput(self._wid_video)
         self._video_player.setMedia(QtMultimedia.QMediaContent(QtCore.QUrl.fromLocalFile(fs_file)))
-        self._video_player.mediaStatusChanged.connect(self._restart_video_when_finished)
+        self._video_player.mediaStatusChanged.connect(self._on_video_media_status)
+
+        # o arquivo do player, para o log se ele vier a ser inválido
+        self._video_file = fs_file
 
         self._lay_media.setCurrentWidget(self._wid_video)
         self._video_player.play()
 
+        return True
+
     # ─────────────────────────────────────────────────────────────────────────────────
-    def _restart_video_when_finished(self, f_media_status):
+    def _on_video_media_status(self, f_media_status):
         """
-        loop do vídeo: o QMediaPlayer do Qt5 não tem modo de repetição, então
-        quando o vídeo chega ao fim ele é rebobinado e tocado de novo.
+        - InvalidMedia: o vídeo não decodifica (vazio, truncado): imagem de
+          indisponível, como uma imagem inválida;
+        - EndOfMedia: loop (o QMediaPlayer do Qt5 não tem modo de repetição,
+          então o vídeo é rebobinado e tocado de novo).
 
         :param f_media_status: QMediaPlayer.MediaStatus recebido do sinal
         """
+        if self._video_player is None:
+            return
+
+        if f_media_status == QtMultimedia.QMediaPlayer.InvalidMedia:
+            _log_invalid_once(self._video_file, _get_mtime_or_none(self._video_file))
+
+            # fora deste slot: _show_unavailable descarta o player, que ainda
+            # está emitindo o sinal (apagá-lo aqui pode derrubar o processo)
+            QtCore.QTimer.singleShot(0, self._show_invalid_video)
+            return
+
         if f_media_status != QtMultimedia.QMediaPlayer.EndOfMedia:
             return
 
@@ -286,26 +328,53 @@ class CTileWidget(QtWidgets.QWidget):
         self._video_player.play()
 
     # ─────────────────────────────────────────────────────────────────────────────────
-    def _show_gif(self, fs_file: str):
+    def _show_invalid_video(self):
+        """
+        imagem de indisponível no lugar de um vídeo que não decodifica, se o
+        tile ainda estiver nele (a página pode ter mudado nesse meio-tempo).
+        """
+        if self._video_player is None:
+            return
+
+        self._show_unavailable(CS_INVALID_CAPTION)
+
+    # ─────────────────────────────────────────────────────────────────────────────────
+    def _show_gif(self, fs_file: str) -> bool:
         """
         mostra um GIF animado (o CImageLabel cuida da escala e da animação).
 
         :param fs_file: caminho do arquivo .gif (já verificado que existe)
+        :returns: False se o GIF não decodifica (nada é exibido)
         """
+        # isValid() só olha o cabeçalho: um GIF truncado passa. Decodificar o
+        # 1º quadro (num leitor à parte, o QMovie fica intacto) pega esse caso
+        if QtGui.QImageReader(fs_file).read().isNull():
+            return False
+
         self._gif_movie = QtGui.QMovie(fs_file)
 
         self._lbl_image.set_content(self._gif_movie)
         self._lay_media.setCurrentWidget(self._lbl_image)
 
+        return True
+
     # ─────────────────────────────────────────────────────────────────────────────────
-    def _show_static_image(self, fs_file: str):
+    def _show_static_image(self, fs_file: str) -> bool:
         """
         mostra uma imagem estática (PNG, JPG, ...).
 
         :param fs_file: caminho do arquivo de imagem (já verificado que existe)
+        :returns: False se a imagem não decodifica (nada é exibido)
         """
-        self._lbl_image.set_content(QtGui.QPixmap(fs_file))
+        l_pixmap = QtGui.QPixmap(fs_file)
+
+        if l_pixmap.isNull():
+            return False
+
+        self._lbl_image.set_content(l_pixmap)
         self._lay_media.setCurrentWidget(self._lbl_image)
+
+        return True
 
     # ─────────────────────────────────────────────────────────────────────────────────
     def _show_modified_time(self, ff_modified_timestamp: float):
@@ -332,6 +401,39 @@ def _create_centered_label(fs_text: str, fs_object_name: str):
     l_label.setAlignment(QtCore.Qt.AlignCenter)
 
     return l_label
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _log_invalid_once(fs_file: str, ff_mtime) -> None:
+    """
+    avisa no log que o arquivo não decodifica, uma vez por versão dele (a
+    página volta a cada rotação).
+
+    :param fs_file: caminho do arquivo
+    :param ff_mtime: mtime do arquivo (None se ele sumiu)
+    """
+    if G_INVALID_LOGGED.get(fs_file) == ff_mtime:
+        return
+
+    G_INVALID_LOGGED[fs_file] = ff_mtime
+
+    try:
+        li_size = os.path.getsize(fs_file)
+
+    except OSError:
+        li_size = None
+
+    M_LOG.warning(f"mídia inválida ou vazia ({li_size} bytes), mostrando indisponível: {fs_file}")
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _get_mtime_or_none(fs_file: str):
+    """
+    :returns: mtime do arquivo, ou None se ele não existir
+    """
+    try:
+        return os.path.getmtime(fs_file)
+
+    except OSError:
+        return None
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 def _find_existing_media_file(fs_file: str):
