@@ -53,6 +53,9 @@ FLASK_DEBUG, MEDIA_MAX_AGE_HOURS, STSC_DATA, OFLOW_DATA, UNET_DATA,
 NOWCAST_MAX_AGE_HOURS, OFL_NO_CAST_IMAGE (as cinco últimas com os mesmos
 nomes do dashboard desktop).
 
+2026.nov  mlabru  caminhos relativos não dependem mais do diretório atual:
+                  CONFIG_FILE é relativo a apps/be, "media_dir" ao
+                  diretório do config.json; .env lido de apps/be
 2026.nov  mlabru  validate_config valida toda página: "duration" número > 0
                   (sem ela o frontend trocava de página a cada 0 ms) e, nas
                   páginas comuns, "tiles" lista de objetos
@@ -98,10 +101,17 @@ from dotenv import load_dotenv
 
 # < environment >----------------------------------------------------------------------
 
-# carrega o .env (se existir) para os.environ antes de ler as variáveis abaixo
-load_dotenv()
+# diretório deste módulo (apps/be): base dos caminhos relativos, para o
+# backend funcionar igual qualquer que seja o diretório de onde foi lançado
+# (ex.: gunicorn --chdir, systemd)
+CS_APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-CS_CONFIG_FILE = os.environ.get("CONFIG_FILE", "config.json")
+# carrega o .env de apps/be (se existir) para os.environ antes de ler as
+# variáveis abaixo; o ambiente tem precedência
+load_dotenv(os.path.join(CS_APP_DIR, ".env"))
+
+# relativo = relativo a apps/be (não ao diretório atual)
+CS_CONFIG_FILE = os.path.join(CS_APP_DIR, os.environ.get("CONFIG_FILE", "config.json"))
 CS_HOST = os.environ.get("HOST", "0.0.0.0")
 CI_PORT = int(os.environ.get("PORT", "8000"))
 CLST_CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost").split(",")
@@ -606,9 +616,27 @@ def _read_config_file(fs_path: str) -> dict:
     with open(fs_path, "r", encoding="utf-8") as l_file:
         ldct_config = json.load(l_file)
 
+    _resolve_media_dir(ldct_config, os.path.dirname(os.path.abspath(fs_path)))
+
     validate_config(ldct_config)
 
     return ldct_config
+
+# -------------------------------------------------------------------------------------
+def _resolve_media_dir(fdct_config: dict, fs_config_dir: str) -> None:
+    """
+    torna "media_dir" absoluto: um caminho relativo (ex.: "./media") passa a
+    valer a partir do diretório do config.json, e não do diretório atual do
+    processo. Sem "media_dir" (ou com valor que não é texto) não faz nada:
+    validate_config dá o erro.
+
+    :param fdct_config: configuração lida (alterada no lugar)
+    :param fs_config_dir: diretório absoluto do config.json
+    """
+    ls_media_dir = fdct_config.get("media_dir")
+
+    if isinstance(ls_media_dir, str):
+        fdct_config["media_dir"] = os.path.normpath(os.path.join(fs_config_dir, ls_media_dir))
 
 # -------------------------------------------------------------------------------------
 def validate_config(fdct_config: dict) -> None:

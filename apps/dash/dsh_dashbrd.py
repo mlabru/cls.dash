@@ -148,7 +148,9 @@ class CDashboardApp(QtWidgets.QMainWindow):
         self._update_timer.timeout.connect(self._on_update_timer)
         self._update_timer.start(gc.CI_UPDATE_INTERVAL_MS)
 
-        self._remote_server = rs.CRemoteServer(gc.CI_DASHBOARD_PORT)
+        self._remote_server = rs.CRemoteServer(gc.CI_DASHBOARD_PORT,
+                                               gc.CS_DASHBOARD_LISTEN_ADDRESS,
+                                               gc.CSET_DASHBOARD_ALLOWED_IPS)
         self._remote_server.signals.sgn_command_received.connect(self.process_remote_command)
         self._remote_server.start()
 

@@ -43,3 +43,22 @@ def test_toggle_alert_failure_reverts_button_without_running_opposite_action(pad
     assert pad._btn_alert.isChecked() is False
     assert calls == [True]  # o revert não reexecutou o slot com False
     assert pad.statusBar().currentMessage() != "ALERTA DESATIVADO"
+
+
+def test_alert_button_follows_trigger_file_changed_externally(pad):
+    import os
+
+    calls = []
+    pad._btn_alert.toggled.connect(calls.append)
+
+    open(gc.CS_ALERT_TRIGGER, "a").close()
+    pad._sync_alert_button_with_trigger_file()
+    assert pad._btn_alert.isChecked() is True
+    assert pad.statusBar().currentMessage() == "ALERTA ATIVADO EXTERNAMENTE"
+
+    os.remove(gc.CS_ALERT_TRIGGER)
+    pad._sync_alert_button_with_trigger_file()
+    assert pad._btn_alert.isChecked() is False
+
+    assert calls == []  # sincronizar não dispara a ação do botão
+    assert not os.path.exists(gc.CS_ALERT_TRIGGER)

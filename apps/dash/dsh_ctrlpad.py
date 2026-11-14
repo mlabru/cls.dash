@@ -17,8 +17,12 @@ como cada botão age:
     <IP digitado>:gc.CI_DASHBOARD_PORT ("PREV", "NEXT", "STOP", "START",
     "GOTO n"), sem esperar resposta;
   - alerta: cria ou apaga o arquivo gc.CS_ALERT_TRIGGER. NÃO usa a rede: só
-    funciona se o pad e o dashboard enxergarem o mesmo disco.
+    funciona se o pad e o dashboard enxergarem o mesmo disco. Um timer
+    (CI_ALERT_SYNC_INTERVAL_MS) mantém o botão igual ao arquivo, mesmo que
+    outro pad, um script ou um "rm" o mude.
 
+2026.nov  mlabru  botão de alerta acompanha o arquivo de alerta (antes só era
+                  lido ao abrir o pad e ficava errado se o arquivo mudasse)
 2026.out  mlabru  refatoração para legibilidade: seções da tela com uma só
                   função de caixa de grupo; envio UDP fecha o socket e só
                   captura OSError; o botão de alerta separa a ação no arquivo
@@ -36,7 +40,7 @@ import os
 import socket
 
 # PyQt
-from PyQt5 import QtWidgets
+from PyQt5 import QtCore, QtWidgets
 
 # locals
 import dash.dsh_config as gc
@@ -52,6 +56,9 @@ CS_STATUS_BAR_STYLE = "color: #00ff00; background: #1a1c24;"
 
 # número de colunas da grade de botões "IR PARA PÁGINA"
 CI_PAGE_BUTTON_COLUMNS = 2
+
+# intervalo (ms) da conferência do botão de alerta com o arquivo de alerta
+CI_ALERT_SYNC_INTERVAL_MS = 1000
 
 # < logging >──────────────────────────────────────────────────────────────────────────
 
@@ -84,6 +91,10 @@ class CControlPadApp(QtWidgets.QMainWindow):
 
         self.statusBar().setStyleSheet(CS_STATUS_BAR_STYLE)
         self.statusBar().showMessage("Ready")
+
+        self._alert_sync_timer = QtCore.QTimer(self)
+        self._alert_sync_timer.timeout.connect(self._sync_alert_button_with_trigger_file)
+        self._alert_sync_timer.start(CI_ALERT_SYNC_INTERVAL_MS)
 
     # < montagem da tela >─────────────────────────────────────────────────────────────
 
@@ -237,6 +248,22 @@ class CControlPadApp(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Erro de Arquivo",
                                            f"Não foi possível gerenciar o gatilho de alerta:\n{l_error}")
             self._set_alert_button_without_signal(not fb_alert_on)
+
+    # ─────────────────────────────────────────────────────────────────────────────────
+    def _sync_alert_button_with_trigger_file(self):
+        """
+        põe o botão de alerta no estado do arquivo de alerta, se alguém o
+        criou ou apagou por fora. Sem emitir toggled: o arquivo já está como
+        deve, não há ação a executar.
+        """
+        lb_alert_on = os.path.exists(gc.CS_ALERT_TRIGGER)
+
+        if lb_alert_on == self._btn_alert.isChecked():
+            return
+
+        self._set_alert_button_without_signal(lb_alert_on)
+        self.statusBar().showMessage("ALERTA ATIVADO EXTERNAMENTE" if lb_alert_on
+                                     else "ALERTA DESATIVADO EXTERNAMENTE")
 
     # ─────────────────────────────────────────────────────────────────────────────────
     def _set_alert_button_without_signal(self, fb_checked: bool):

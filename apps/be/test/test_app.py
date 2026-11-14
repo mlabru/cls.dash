@@ -573,3 +573,34 @@ def test_api_state_reflects_alert_file(client, monkeypatch, tmp_path):
 
     trigger.write_text("ALERTA")
     assert client.get("/api/state").get_json() == {"alert": True}
+
+
+# ---------------------------------------------------------------------------
+# caminhos relativos (independentes do diretório atual)
+# ---------------------------------------------------------------------------
+
+def test_relative_media_dir_resolves_from_config_dir_not_cwd(tmp_path, monkeypatch):
+    conf_dir = tmp_path / "conf"
+    (conf_dir / "media").mkdir(parents=True)
+    (conf_dir / "media" / "img.png").write_bytes(b"x")
+    path = conf_dir / "config.json"
+    path.write_text(json.dumps({"media_dir": "./media",
+                                "pages": [{"name": "p", "duration": 1,
+                                           "tiles": [{"type": "image", "file": "img.png"}]}]}),
+                    encoding="utf-8")
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(be_app, "CS_CONFIG_FILE", str(path))
+    monkeypatch.setattr(be_app, "G_CONFIG_CACHE_KEY", None)
+
+    be_app.load_config()
+
+    assert be_app.get_media_dir() == str(conf_dir / "media")
+    assert be_app.app.test_client().get("/media/img.png").status_code == 200
+
+
+def test_default_config_file_is_relative_to_app_dir():
+    assert os.path.isabs(be_app.CS_CONFIG_FILE)
+    assert os.path.dirname(be_app.CS_CONFIG_FILE) == be_app.CS_APP_DIR

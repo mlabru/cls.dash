@@ -87,3 +87,47 @@ def test_malformed_packet_is_discarded_without_killing_the_server(qapp):
     assert _wait_for(lambda: len(received) == 1)
     assert received == ["NEXT"]
     assert server.is_alive()
+
+
+def test_allowlist_discards_commands_from_other_ips(qapp):
+    port = _free_udp_port()
+    # 127.0.0.2 também é loopback no Linux: serve de "outra máquina"
+    server = rs.CRemoteServer(port, "127.0.0.1", {"127.0.0.2"})
+
+    received = []
+    server.signals.sgn_command_received.connect(lambda cmd, ip: received.append((cmd, ip)))
+    server.start()
+
+    time.sleep(0.1)
+
+    rejected = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rejected.bind(("127.0.0.1", 0))
+    rejected.sendto(b"next", ("127.0.0.1", port))
+    rejected.close()
+
+    allowed = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    allowed.bind(("127.0.0.2", 0))
+    allowed.sendto(b"prev", ("127.0.0.1", port))
+    allowed.close()
+
+    assert _wait_for(lambda: len(received) == 1)
+    time.sleep(0.1)
+    assert received == [("PREV", "127.0.0.2")]
+    assert server._set_rejected_ips == {"127.0.0.1"}
+
+
+def test_listen_address_is_honored(qapp):
+    port = _free_udp_port()
+    server = rs.CRemoteServer(port, "127.0.0.1")
+
+    received = []
+    server.signals.sgn_command_received.connect(lambda cmd, ip: received.append(cmd))
+    server.start()
+
+    time.sleep(0.1)
+
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    client.sendto(b"stop", ("127.0.0.1", port))
+    client.close()
+
+    assert _wait_for(lambda: received == ["STOP"])

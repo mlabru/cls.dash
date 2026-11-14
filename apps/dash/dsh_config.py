@@ -15,6 +15,8 @@ o que fica aqui:
     do 25.u-net (a expansão em páginas fica em dsh_nowcast);
   - CLST_PAGES: as páginas que o dashboard roda em ciclo.
 
+2026.nov  mlabru  DASH_LISTEN_ADDRESS e DASH_ALLOWED_IPS: interface de escuta e
+                  IPs autorizados do servidor UDP
 2026.nov  mlabru  monitor de recepção lê $RSM_PATH/data/output/rsm_out.png (o
                   nome que o 21.mrad gera e o dash_sync.sh traz), não mais
                   $DASH_DATA/output/monrad.png; CS_RSM_PATH
@@ -45,6 +47,18 @@ CS_DASHBOARD_IP = "127.0.0.1"
 
 # porta UDP em que o dashboard escuta os comandos do control pad
 CI_DASHBOARD_PORT = 5005
+
+# interface em que o dashboard escuta: "0.0.0.0" (padrão) aceita o pad de
+# outra máquina; "127.0.0.1" só o pad local (o alerta, que é por arquivo, já
+# exige o pad no mesmo disco)
+CS_DASHBOARD_LISTEN_ADDRESS = os.getenv("DASH_LISTEN_ADDRESS", "0.0.0.0")
+
+# IPs de onde o dashboard aceita comandos (DASH_ALLOWED_IPS, separados por
+# vírgula); vazio = qualquer um. O protocolo não tem autenticação: sem esta
+# lista, qualquer máquina que alcance a porta navega o videowall
+CSET_DASHBOARD_ALLOWED_IPS = frozenset(ls_ip.strip()
+                                       for ls_ip in os.getenv("DASH_ALLOWED_IPS", "").split(",")
+                                       if ls_ip.strip())
 
 # < aparência >────────────────────────────────────────────────────────────────────────
 
