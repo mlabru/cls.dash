@@ -234,7 +234,7 @@ function buildFooterText(tile) {
 // navegador só revalida (304), sem baixar o GIF de novo. Sem versão
 // (arquivo ausente), "?t=<agora>" força uma nova busca.
 // 
-// @param {string} fileName nome do arquivo em media_dir
+// @param {string} fileName "<raiz>/<arquivo>" (campo file do tile)
 // @param {number} [version] file_version do tile
 // @returns {string} URL completa
 //
