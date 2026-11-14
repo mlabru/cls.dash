@@ -3,7 +3,9 @@
 # dash_web.sh
 #
 # Sobe em background o dashboard web: backend Flask (apps/be, servido pelo
-# gunicorn) + frontend estático (apps/fe).
+# gunicorn) + frontend estático (apps/fe, servido pelo apps/fe/fe_server.py:
+# o http.server com "Cache-Control: no-cache", para o navegador pegar o
+# app.js/style.css novos logo após um deploy, sem "?v=" no index.html).
 #
 # O backend roda no gunicorn, e não com "python3 app.py": o servidor de
 # desenvolvimento do Flask, com FLASK_DEBUG=true e HOST=0.0.0.0, expõe na rede
@@ -25,6 +27,8 @@
 # Use ./dash_off.sh web para parar o que este script iniciar (o gunicorn e
 # seus workers estão no mesmo grupo de processos).
 #
+# 2026.nov  mlabru  frontend no fe_server.py (no-cache) em vez de
+#                   "python3 -m http.server"
 # 2026.nov  mlabru  backend no gunicorn em vez do servidor de desenvolvimento
 
 set -u -o pipefail
@@ -67,7 +71,7 @@ fi
 status=0
 start_one backend  "$APPS_DIR/be" gunicorn -w "$BACKEND_WORKERS" \
                    -b "${BACKEND_HOST}:${BACKEND_PORT}" app:app || status=1
-start_one frontend "$APPS_DIR/fe" python3 -m http.server "$FRONTEND_PORT" || status=1
+start_one frontend "$APPS_DIR/fe" python3 fe_server.py "$FRONTEND_PORT" || status=1
 
 echo
 echo "dashboard web:    http://localhost:${FRONTEND_PORT} (frontend) / http://localhost:${BACKEND_PORT}/api/config (backend)"

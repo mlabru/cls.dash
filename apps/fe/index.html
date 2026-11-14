@@ -5,9 +5,10 @@
     <meta charset="UTF-8">
     <title>Dashboard STSC</title>
 
-    <!-- ?v=: http.server não manda Cache-Control e o navegador reusa o
-         app.js/style.css velhos após um deploy; troque a versão ao alterá-los -->
-    <link rel="stylesheet" href="style.css?v=2026.10.14">
+    <!-- sem "?v=": o fe_server.py manda "Cache-Control: no-cache" e o navegador
+         revalida o app.js/style.css a cada carga (304 se não mudaram). Servindo
+         por outro servidor (nginx etc.), configure o mesmo cabeçalho -->
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
@@ -26,7 +27,7 @@
     <!-- backend em outra máquina/porta: descomente e ajuste (ver resolveApiBase em app.js)
     <script>window.DASH_API_BASE = "http://servidor:8000";</script>
     -->
-    <script src="app.js?v=2026.11.14"></script>
+    <script src="app.js"></script>
 
 </body>
 </html>
