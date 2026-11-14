@@ -8,6 +8,19 @@ import pytest
 
 import dash.dsh_config as gc
 import dash.dsh_dashbrd as ad
+import dash.dsh_nowcast as nc
+from dshcore import dsc_env as de
+
+
+def _use_pages(monkeypatch, pages, roots=None):
+    """troca o config.json por uma config em memória (sem depender de mídia externa)"""
+    config = {"roots": roots or {"m": "/nao"}, "pages": pages}
+    monkeypatch.setattr(nc, "load_config", lambda: config)
+
+
+def _regular(name, duration=10, files=()):
+    return {"duration": duration, "name": name,
+            "tiles": [{"type": "image", "root": "m", "file": f, "title": "X"} for f in files]}
 
 
 def _free_udp_port():
@@ -25,13 +38,10 @@ def dashboard(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(gc, "CI_DASHBOARD_PORT", _free_udp_port())
     monkeypatch.setattr(gc, "CS_ALERT_TRIGGER", str(tmp_path / "ALERTA_ATIVO.txt"))
     monkeypatch.setattr(gc, "CS_NO_CAST_IMAGE", str(tmp_path / "no_cast.png"))
-    monkeypatch.setattr(gc, "CS_OFLOW_DATA", str(tmp_path / "oflw"))
-    monkeypatch.setattr(gc, "CS_UNET_DATA", str(tmp_path / "unet"))
-    monkeypatch.setattr(gc, "CLST_PAGES", [
-        {"duration": 10, "name": "Página A", "tiles": []},
-        {"duration": 10, "name": "Página B", "tiles": []},
-        {"duration": 10, "name": "Página C", "tiles": []},
-    ])
+    monkeypatch.setattr(de, "CS_OFLOW_DATA", str(tmp_path / "oflw"))
+    monkeypatch.setattr(de, "CS_UNET_DATA", str(tmp_path / "unet"))
+    monkeypatch.setattr(de, "CI_NOWCAST_MAX_AGE_HOURS", 2)
+    _use_pages(monkeypatch, [_regular("Página A"), _regular("Página B"), _regular("Página C")])
 
     app = ad.CDashboardApp()
     app._update_timer.stop()  # controlamos o avanço manualmente nos testes
@@ -119,10 +129,7 @@ def test_tile_exception_does_not_crash_page_change(dashboard, monkeypatch):
         raise RuntimeError("falha simulada no tile")
 
     monkeypatch.setattr(ad.wt.CTileWidget, "update_content", _boom)
-    monkeypatch.setattr(gc, "CLST_PAGES", [
-        {"duration": 10, "name": "Página A", "tiles": []},
-        {"duration": 10, "name": "Página B", "tiles": [("X", "/nao/existe.png")]},
-    ])
+    _use_pages(monkeypatch, [_regular("Página A"), _regular("Página B", files=["existe.png"])])
 
     dashboard.process_remote_command("NEXT", "127.0.0.1")
 
@@ -145,11 +152,11 @@ def _make_mosaics(tmp_path, radar_ids):
 @pytest.fixture
 def nowcast_dashboard(dashboard, tmp_path, monkeypatch):
     _make_mosaics(tmp_path, ["AAA", "BBB"])
-    monkeypatch.setattr(gc, "CLST_PAGES", [
-        {"duration": 10, "name": "Página A", "tiles": []},
+    _use_pages(monkeypatch, [
+        _regular("Página A"),
         {"type": "nowcast", "duration": 20, "name": "Nowcast",
-         "radars": [("AAA", "Radar A"), ("BBB", "Radar B")]},
-        {"duration": 10, "name": "Página C", "tiles": []},
+         "radars": [["AAA", "Radar A"], ["BBB", "Radar B"]]},
+        _regular("Página C"),
     ])
     dashboard._show_page(0)
     return dashboard
@@ -200,10 +207,10 @@ def test_alert_header_survives_page_change_and_restores_page_name(nowcast_dashbo
 
 def test_notice_label_visible_only_on_page_with_hidden_radars(dashboard, tmp_path, monkeypatch):
     _make_mosaics(tmp_path, ["AAA"])
-    monkeypatch.setattr(gc, "CLST_PAGES", [
-        {"duration": 10, "name": "Página A", "tiles": []},
+    _use_pages(monkeypatch, [
+        _regular("Página A"),
         {"type": "nowcast", "duration": 20, "name": "Nowcast",
-         "radars": [("AAA", "Radar A"), ("ZZZ", "Radar Z")]},
+         "radars": [["AAA", "Radar A"], ["ZZZ", "Radar Z"]]},
     ])
 
     dashboard.process_remote_command("GOTO 0", "127.0.0.1")
@@ -225,11 +232,31 @@ def test_page_duration_valid_is_kept():
 
 def test_zero_duration_page_does_not_crash_timer(dashboard, monkeypatch):
     # duration 0 dividia por zero dentro do slot do timer (o PyQt5 aborta)
-    monkeypatch.setattr(gc, "CLST_PAGES", [{"duration": 0, "name": "Z", "tiles": []},
-                                           {"duration": 10, "name": "Y", "tiles": []}])
+    _use_pages(monkeypatch, [_regular("Z", duration=0), _regular("Y")])
     dashboard._show_page(0)
     dashboard._page_start_time -= 2 * ad.CF_MIN_PAGE_SECONDS
 
     dashboard._advance_page_timer()
 
     assert dashboard._current_page_index == 1
+
+
+def test_without_any_valid_config_shows_nothing_and_does_not_crash(dashboard, monkeypatch):
+    monkeypatch.setattr(nc, "load_config", lambda: None)
+
+    dashboard._show_page(1)
+    dashboard.process_remote_command("GOTO 0", "127.0.0.1")
+    dashboard._advance_page_timer()
+
+    assert dashboard._llst_pages == []
+
+
+def test_regular_tile_path_comes_from_root(dashboard, monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(ad.wt.CTileWidget, "update_content",
+                        lambda self, title, path: seen.append((title, path)))
+    _use_pages(monkeypatch, [_regular("A", files=["sub/a.png"])], roots={"m": str(tmp_path)})
+
+    dashboard._show_page(0)
+
+    assert seen == [("X", str(tmp_path / "sub" / "a.png"))]

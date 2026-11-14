@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
-"""testes unitários para apps/dash/dsh_nowcast.py"""
+"""testes unitários para apps/dash/dsh_nowcast.py
 
+a regra de nowcast é do dshcore (test/test_dsc_nowcast.py); aqui fica o que é
+do desktop: o formato (título, caminho), "source_index", o fallback para a
+última config válida e os nomes dos botões do pad.
+"""
+
+import json
 import os
 import time
 
@@ -8,133 +14,110 @@ import pytest
 
 import dash.dsh_config as gc
 import dash.dsh_nowcast as nc
-
-CLST_RADARS = [("BEL", "Belém"), ("BVA", "Boa Vista"), ("CGU", "Canguçu"),
-               ("MDI", "Morro da Igreja"), ("PCO", "Pico do Couto"),
-               ("SRO", "São Roque"), ("STI", "Santiago")]
+from dshcore import dsc_config as dc
+from dshcore import dsc_env as de
 
 
 @pytest.fixture
-def oflow_output(tmp_path, monkeypatch):
-    """saídas do oflow e do u-net com um mosaico recente de 400 km para cada
-    radar (devolve a do oflow; a do u-net é a fixture unet_output)."""
+def mosaics(tmp_path, monkeypatch):
     for source in ("oflw", "unet"):
         out = tmp_path / source / "output"
         out.mkdir(parents=True)
+        (out / "BEL_400_now_mosaico.gif").write_bytes(b"GIF89a")
 
-        for radar_id, _ in CLST_RADARS:
-            (out / f"{radar_id}_400_now_mosaico.gif").write_bytes(b"GIF89a")
-
-    monkeypatch.setattr(gc, "CS_OFLOW_DATA", str(tmp_path / "oflw"))
-    monkeypatch.setattr(gc, "CS_UNET_DATA", str(tmp_path / "unet"))
+    monkeypatch.setattr(de, "CS_OFLOW_DATA", str(tmp_path / "oflw"))
+    monkeypatch.setattr(de, "CS_UNET_DATA", str(tmp_path / "unet"))
+    monkeypatch.setattr(de, "CI_NOWCAST_MAX_AGE_HOURS", 2)
     monkeypatch.setattr(gc, "CS_NO_CAST_IMAGE", str(tmp_path / "no_cast.png"))
-    monkeypatch.setattr(gc, "CI_NOWCAST_MAX_AGE_HOURS", 2)
-    return tmp_path / "oflw" / "output"
+    return tmp_path
 
+
+def _config(tmp_path, radars=(("BEL", "Belém"),)):
+    return {"roots": {"m": str(tmp_path / "media")},
+            "pages": [{"name": "A", "duration": 10,
+                       "tiles": [{"type": "image", "root": "m", "file": "a.png", "title": "T"},
+                                 {"type": "video", "root": "m", "file": "b.mp4"}]},
+                      {"type": "nowcast", "name": "Nowcast", "duration": 20,
+                       "radars": [list(r) for r in radars]}]}
+
+
+def test_regular_page_tiles_become_title_and_absolute_path(mosaics):
+    page = nc.build_runtime_pages(_config(mosaics), time.time())[0]
+
+    assert page["tiles"] == [("T", str(mosaics / "media" / "a.png")),
+                             ("", str(mosaics / "media" / "b.mp4"))]
+    assert page["notice"] == "" and page["source_index"] == 0
+
+
+def test_nowcast_rows_become_mosaic_path_or_unavailable_image(mosaics):
+    (mosaics / "unet" / "output" / "BEL_400_now_mosaico.gif").unlink()
+
+    page = nc.build_runtime_pages(_config(mosaics), time.time())[1]
+
+    assert page["layout"] == "rows" and page["source_index"] == 1
+    assert page["tiles"] == [
+        ("Belém (BEL) - Fluxo óptico", str(mosaics / "oflw" / "output" / "BEL_400_now_mosaico.gif")),
+        ("Belém (BEL) - U-Net: sem atualização há mais de 2 h", gc.CS_NO_CAST_IMAGE),
+    ]
+
+
+def test_all_hidden_page_uses_unavailable_image(mosaics):
+    page = nc.build_runtime_pages(_config(mosaics, radars=[("ZZZ", "Z")]), time.time())[1]
+
+    assert page["tiles"] == [("Nenhum radar com nowcast recente", gc.CS_NO_CAST_IMAGE)]
+    assert page["notice"] == "Sem atualização há mais de 2 h: Z (ZZZ)"
+
+
+def test_source_index_points_at_config_entry(mosaics):
+    (mosaics / "oflw" / "output" / "STI_400_now_mosaico.gif").write_bytes(b"GIF89a")
+    config = _config(mosaics, radars=[("BEL", "Belém"), ("STI", "Santiago")])
+
+    pages = nc.build_runtime_pages(config, time.time())
+
+    assert [p["source_index"] for p in pages] == [0, 1, 1]
+    assert "source_index" not in config["pages"][0]  # a configuração não é alterada
+
+
+# ---------------------------------------------------------------------------
+# load_config / page_names
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
-def unet_output(oflow_output):
-    return oflow_output.parent.parent / "unet" / "output"
+def config_file(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(_config(tmp_path)), encoding="utf-8")
+    monkeypatch.setattr(de, "CS_CONFIG_FILE", str(path))
+    monkeypatch.setattr(nc, "G_CONFIG_CACHE", dc.CConfigCache())
+    monkeypatch.setattr(nc, "G_LAST_CONFIG_ERROR", None)
+    return path
 
 
-def _unlink_all(*dirs):
-    for out in dirs:
-        for gif in out.iterdir():
-            gif.unlink()
+def test_page_names_come_from_config(config_file):
+    assert nc.page_names() == ["A", "Nowcast"]
 
 
-def _entry(radars=CLST_RADARS):
-    return {"type": "nowcast", "duration": 20, "name": "Nowcast", "radars": radars}
+def test_broken_config_keeps_last_good_and_logs_once(config_file, caplog):
+    good = nc.load_config()
+
+    config_file.write_text("{ broken", encoding="utf-8")
+    future = os.path.getmtime(config_file) + 5
+    os.utime(config_file, (future, future))
+
+    with caplog.at_level("ERROR", logger=nc.__name__):
+        assert nc.load_config() is good
+        assert nc.load_config() is good
+
+    assert len(caplog.records) == 1
 
 
-def test_one_page_per_radar_with_oflow_and_unet_rows(oflow_output, unet_output):
-    pages = nc.build_runtime_pages([_entry()], time.time())
+def test_never_loaded_config_gives_none_and_no_page_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(de, "CS_CONFIG_FILE", str(tmp_path / "missing.json"))
+    monkeypatch.setattr(nc, "G_CONFIG_CACHE", dc.CConfigCache())
 
-    assert len(pages) == 7
-    assert pages[0]["name"] == "Nowcast (1/7)"
-    assert pages[0]["layout"] == "rows"
-    assert pages[0]["tiles"] == [
-        ("Belém (BEL) - Fluxo óptico", str(oflow_output / "BEL_400_now_mosaico.gif")),
-        ("Belém (BEL) - U-Net", str(unet_output / "BEL_400_now_mosaico.gif")),
-    ]
-    assert all(p["source_index"] == 0 for p in pages)
+    assert nc.load_config() is None
+    assert nc.page_names() == []
 
 
-def test_radars_without_any_recent_mosaic_are_hidden(oflow_output, unet_output):
-    (oflow_output / "BEL_400_now_mosaico.gif").unlink()
-    (unet_output / "BEL_400_now_mosaico.gif").unlink()
-    old = time.time() - 3 * 3600
-    for out in (oflow_output, unet_output):
-        os.utime(out / "CGU_400_now_mosaico.gif", (old, old))
-
-    pages = nc.build_runtime_pages([_entry()], time.time())
-    titles = [title for p in pages for title, _ in p["tiles"]]
-
-    assert len(pages) == 5
-    assert not any("BEL" in t or "CGU" in t for t in titles)
-
-
-def test_missing_or_stale_source_becomes_unavailable_row(oflow_output, unet_output):
-    (unet_output / "BEL_400_now_mosaico.gif").unlink()
-    old = time.time() - 3 * 3600
-    os.utime(oflow_output / "BVA_400_now_mosaico.gif", (old, old))
-
-    pages = nc.build_runtime_pages([_entry()], time.time())
-
-    assert len(pages) == 7
-    assert pages[0]["tiles"][1] == ("Belém (BEL) - U-Net: sem atualização há mais de 2 h",
-                                    gc.CS_NO_CAST_IMAGE)
-    assert pages[1]["tiles"][0] == ("Boa Vista (BVA) - Fluxo óptico: sem atualização há mais de 2 h",
-                                    gc.CS_NO_CAST_IMAGE)
-    assert all(p["notice"] == "" for p in pages)
-
-
-def test_all_hidden_gives_single_unavailable_page(oflow_output, unet_output):
-    _unlink_all(oflow_output, unet_output)
-
-    pages = nc.build_runtime_pages([_entry()], time.time())
-
-    assert len(pages) == 1
-    assert pages[0]["name"] == "Nowcast"
-    assert pages[0]["tiles"] == [(nc.CS_NO_RADAR_TITLE, gc.CS_NO_CAST_IMAGE)]
-
-
-def test_regular_pages_keep_order_and_get_source_index(oflow_output):
-    regular = {"duration": 10, "name": "A", "tiles": []}
-
-    pages = nc.build_runtime_pages([regular, _entry(CLST_RADARS[:3]), regular], time.time())
-
-    assert [p["source_index"] for p in pages] == [0, 1, 1, 1, 2]
-    assert pages[0]["name"] == "A" and pages[4]["name"] == "A"
-    assert "source_index" not in regular  # a configuração não é alterada
-
-
-def test_real_config_has_one_nowcast_entry_with_fixed_radar_list():
-    entries = [p for p in gc.CLST_PAGES if p.get("type") == nc.CS_NOWCAST_PAGE_TYPE]
-
-    assert len(entries) == 1
-    assert entries[0]["radars"] is gc.CLST_NOWCAST_RADARS
-    assert gc.CI_NOWCAST_RANGE_KM == 400
-
-
-def test_notice_lists_hidden_radars(oflow_output, unet_output):
-    (oflow_output / "SRO_400_now_mosaico.gif").unlink()
-    (unet_output / "SRO_400_now_mosaico.gif").unlink()
-
-    pages = nc.build_runtime_pages([_entry()], time.time())
-
-    assert all(p["notice"] == "Sem atualização há mais de 2 h: São Roque (SRO)" for p in pages)
-
-
-def test_notice_empty_without_hidden_radars(oflow_output):
-    pages = nc.build_runtime_pages([_entry()], time.time())
-
-    assert all(p["notice"] == "" for p in pages)
-
-
-def test_all_hidden_page_has_notice(oflow_output, unet_output):
-    _unlink_all(oflow_output, unet_output)
-
-    page = nc.build_runtime_pages([_entry(CLST_RADARS[:1])], time.time())[0]
-
-    assert page["notice"] == "Sem atualização há mais de 2 h: Belém (BEL)"
+def test_real_config_gives_one_pad_button_per_entry():
+    assert nc.page_names() == ["Monitor de Recepção de Dados Radar", "Monitoramento de Raios",
+                               "NOAA GOES-East", "Nowcast Radar 400 km"]

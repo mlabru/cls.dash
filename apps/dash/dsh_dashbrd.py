@@ -5,13 +5,13 @@ Copyright (c) 1995-2026, Instituto de Controle do Espaço Aéreo
 
 dsh_dashbrd
 janela principal do dashboard desktop (NOC / videowall): roda em ciclo as
-páginas de gc.CLST_PAGES. Não foi feita para interação direta: é comandada
+páginas do config.json comum com o web (dsh_nowcast.load_config). Não foi feita para interação direta: é comandada
 pelo control pad (UDP) e pelo arquivo de alerta.
 
-páginas de execução: a cada troca de página, gc.CLST_PAGES é expandida por
-dsh_nowcast.build_runtime_pages (cada entrada de nowcast vira N páginas, uma
+páginas de execução: a cada troca de página, a config (relida se o
+config.json mudou) é expandida por dsh_nowcast.build_runtime_pages (cada entrada de nowcast vira N páginas, uma
 linha por radar, conforme a idade dos mosaicos). _current_page_index indexa
-essa lista; GOTO n indexa gc.CLST_PAGES (os botões do pad) e vai para a
+essa lista; GOTO n indexa as entradas do config.json (os botões do pad) e vai para a
 primeira página de execução vinda da entrada n. Se um radar aparecer ou
 sumir no meio do ciclo, a rotação pode repetir ou pular uma página uma vez.
 
@@ -41,6 +41,8 @@ regra de robustez: o PyQt5 encerra o programa inteiro se uma exceção escapa
 de um slot. Toda troca de página passa por _show_page, que isola cada tile
 (um tile com problema fica em branco, mas o videowall continua no ar).
 
+2026.nov  mlabru  páginas vêm do config.json comum com o web (dsh_nowcast.
+                  load_config), não mais de gc.CLST_PAGES
 2026.nov  mlabru  "duration" inválida (ausente, 0, não numérica) vira
                   CF_MIN_PAGE_SECONDS: antes dividia por zero no slot do timer
 2026.out  mlabru  _lbl_notice: aviso da página (radares de nowcast ocultos)
@@ -100,7 +102,7 @@ CS_STATUS_COLOR_ALERT = "red"
 # página exibida durante o alerta prioritário
 CI_ALERT_PAGE_INDEX = 0
 
-# piso da duração de uma página (s): "duration" inválida em CLST_PAGES vira
+# piso da duração de uma página (s): "duration" inválida na config vira
 # isso em vez de derrubar o programa (ver _page_duration)
 CF_MIN_PAGE_SECONDS = 1.
 
@@ -126,6 +128,7 @@ class CDashboardApp(QtWidgets.QMainWindow):
         super().__init__()
 
         self._llst_pages = []
+        self._li_config_page_count = 0
         self._current_page_index = 0
         self._page_start_time = time.time()
         self._is_paused = False
@@ -209,7 +212,7 @@ class CDashboardApp(QtWidgets.QMainWindow):
         self._rebuild_pages()
 
         if not self._llst_pages:
-            M_LOG.error("CLST_PAGES está vazia: nenhuma página para exibir")
+            M_LOG.error("sem configuração válida: nenhuma página para exibir")
             return
 
         self._current_page_index = fi_page_index % len(self._llst_pages)
@@ -245,28 +248,37 @@ class CDashboardApp(QtWidgets.QMainWindow):
     # ─────────────────────────────────────────────────────────────────────────────────
     def _rebuild_pages(self):
         """
-        recalcula as páginas de execução a partir de gc.CLST_PAGES. Barato
+        recalcula as páginas de execução a partir do config.json (relido só
+        se mudou; inválido = última versão válida; nunca lido = sem páginas). Barato
         (só um stat por radar), por isso roda a cada troca de página: um
         radar que volta ao ar aparece já na próxima página.
         """
-        self._llst_pages = nc.build_runtime_pages(gc.CLST_PAGES, time.time())
+        ldct_config = nc.load_config()
+
+        if ldct_config is None:
+            self._llst_pages = []
+            self._li_config_page_count = 0
+            return
+
+        self._llst_pages = nc.build_runtime_pages(ldct_config, time.time())
+        self._li_config_page_count = len(ldct_config["pages"])
 
     # ─────────────────────────────────────────────────────────────────────────────────
     def _show_config_page(self, fi_config_index: int):
         """
         mostra a primeira página de execução vinda da entrada fi_config_index
-        de gc.CLST_PAGES (é o índice que o control pad envia no GOTO).
+        do config.json (é o índice que o control pad envia no GOTO).
 
-        :param fi_config_index: índice em gc.CLST_PAGES; dá a volta se fora
+        :param fi_config_index: índice das entradas do config.json; dá a volta se fora
                                 da faixa
         """
-        if not gc.CLST_PAGES:
-            M_LOG.error("CLST_PAGES está vazia: nenhuma página para exibir")
-            return
-
         self._rebuild_pages()
 
-        li_source_index = fi_config_index % len(gc.CLST_PAGES)
+        if not self._li_config_page_count:
+            M_LOG.error("sem configuração válida: nenhuma página para exibir")
+            return
+
+        li_source_index = fi_config_index % self._li_config_page_count
 
         for li_page_index, ldct_page in enumerate(self._llst_pages):
             if ldct_page["source_index"] == li_source_index:

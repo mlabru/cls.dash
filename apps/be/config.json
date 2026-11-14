@@ -1,6 +1,11 @@
 {
-  "media_dir": "./media",
   "refresh_seconds": 10,
+
+  "roots": {
+    "mrad":  "${RSM_PATH:-~/Public/mrad}/data/output",
+    "blitz": "${BLITZ_DATA:-$STSC_DATA/bltz/data}/output",
+    "goes":  "${GOES_DATA:-$STSC_DATA/goes/data}/goes19/13/output"
+  },
 
   "pages": [
     {
@@ -10,6 +15,7 @@
       "tiles": [
         {
           "type": "image",
+          "root": "mrad",
           "file": "rsm_out.png"
         }
       ]
@@ -22,12 +28,14 @@
       "tiles": [
         {
           "type": "image",
+          "root": "blitz",
           "file": "slm_now.png",
           "title": "Situação Atual (atualizado a cada 10 min)"
         },
 
         {
           "type": "video",
+          "root": "blitz",
           "file": "slm_out.mp4",
           "title": "Nowcast (30 minutos)"
         }
@@ -41,6 +49,7 @@
       "tiles": [
         {
           "type": "video",
+          "root": "goes",
           "file": "goes1913.mp4",
           "title": "Canal 13 (Infravermelho longa onda)"
         }

@@ -9,7 +9,8 @@ janela do control pad: comanda o dashboard desktop (NOC / videowall).
 layout da janela (de cima para baixo):
   - IP DO DASHBOARD:  campo com o IP para onde os comandos vão;
   - CONTROLE DE CICLO: ANTERIOR / PRÓXIMO, PAUSAR / RETOMAR;
-  - IR PARA PÁGINA:   um botão por página de gc.CLST_PAGES;
+  - IR PARA PÁGINA:   um botão por entrada do config.json comum com o web
+                      (dsh_nowcast.page_names, lido ao abrir o pad);
   - ALERTA PRIORITÁRIO: botão liga/desliga.
 
 como cada botão age:
@@ -21,6 +22,7 @@ como cada botão age:
     (CI_ALERT_SYNC_INTERVAL_MS) mantém o botão igual ao arquivo, mesmo que
     outro pad, um script ou um "rm" o mude.
 
+2026.nov  mlabru  botões de página vêm do config.json comum (nc.page_names)
 2026.nov  mlabru  botão de alerta acompanha o arquivo de alerta (antes só era
                   lido ao abrir o pad e ficava errado se o arquivo mudasse)
 2026.out  mlabru  refatoração para legibilidade: seções da tela com uma só
@@ -44,6 +46,7 @@ from PyQt5 import QtCore, QtWidgets
 
 # locals
 import dash.dsh_config as gc
+import dash.dsh_nowcast as nc
 
 # < constants >────────────────────────────────────────────────────────────────────────
 
@@ -134,7 +137,7 @@ class CControlPadApp(QtWidgets.QMainWindow):
         """
         l_grid_layout = self._add_group_box("IR PARA PÁGINA", QtWidgets.QGridLayout)
 
-        for li_page_index, ls_page_name in enumerate(gc.CLST_PAGE_NAMES):
+        for li_page_index, ls_page_name in enumerate(nc.page_names()):
             l_button = self._create_command_button(ls_page_name, f"GOTO {li_page_index}",
                                                    "ActionBtn")
 
