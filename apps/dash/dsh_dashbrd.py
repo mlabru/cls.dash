@@ -41,6 +41,8 @@ regra de robustez: o PyQt5 encerra o programa inteiro se uma exceção escapa
 de um slot. Toda troca de página passa por _show_page, que isola cada tile
 (um tile com problema fica em branco, mas o videowall continua no ar).
 
+2026.nov  mlabru  "duration" inválida (ausente, 0, não numérica) vira
+                  CF_MIN_PAGE_SECONDS: antes dividia por zero no slot do timer
 2026.out  mlabru  _lbl_notice: aviso da página (radares de nowcast ocultos)
 2026.out  mlabru  páginas de nowcast (expandidas em tempo de execução por
                   dsh_nowcast; layout "rows" = um tile por linha); cabeçalho
@@ -97,6 +99,10 @@ CS_STATUS_COLOR_ALERT = "red"
 
 # página exibida durante o alerta prioritário
 CI_ALERT_PAGE_INDEX = 0
+
+# piso da duração de uma página (s): "duration" inválida em CLST_PAGES vira
+# isso em vez de derrubar o programa (ver _page_duration)
+CF_MIN_PAGE_SECONDS = 1.
 
 # < logging >──────────────────────────────────────────────────────────────────────────
 
@@ -435,7 +441,7 @@ class CDashboardApp(QtWidgets.QMainWindow):
         if not self._llst_pages:
             return
 
-        lf_page_duration = self._llst_pages[self._current_page_index]["duration"]
+        lf_page_duration = _page_duration(self._llst_pages[self._current_page_index])
         lf_elapsed_seconds = time.time() - self._page_start_time
 
         li_progress = int(lf_elapsed_seconds / lf_page_duration * CI_PROGRESS_MAX)
@@ -491,5 +497,27 @@ class CDashboardApp(QtWidgets.QMainWindow):
 
         self.statusBar().setStyleSheet(f"color: {fs_color};")
         self.statusBar().showMessage(f"[{ls_now}] {fs_message}")
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+def _page_duration(fdct_page: dict) -> float:
+    """
+    duração da página em segundos, nunca menor que CF_MIN_PAGE_SECONDS. Roda
+    dentro do slot do timer: "duration" ausente, não numérica ou 0 (divisão
+    por zero) levantaria exceção ali, e o PyQt5 encerraria o programa.
+
+    :param fdct_page: página de execução
+    :returns: a duração configurada, ou CF_MIN_PAGE_SECONDS se ela for inválida
+    """
+    try:
+        lf_duration = float(fdct_page.get("duration"))
+
+    except (TypeError, ValueError):
+        lf_duration = 0.
+
+    # "not >" também pega NaN
+    if not lf_duration > CF_MIN_PAGE_SECONDS:
+        return CF_MIN_PAGE_SECONDS
+
+    return lf_duration
 
 # < the end >──────────────────────────────────────────────────────────────────────────

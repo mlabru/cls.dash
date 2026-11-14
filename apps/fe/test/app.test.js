@@ -398,3 +398,46 @@ test("pollState: falha de rede mantém o estado e agenda nova consulta", async (
         assert.deepEqual(scheduled.map((t) => t.ms), [1000]);
     });
 });
+
+test("showPage: índice fora da faixa dá a volta (páginas diminuíram no refresh)", async () => {
+    const dash = loadApp();
+
+    await withFakeSetTimeout(async (scheduled) => {
+        global.fetch = fakeFetch(false);
+        await dash.loadConfig();
+        scheduled.length = 0;
+
+        dash.showPage(5);  // 2 páginas: 5 % 2 = 1
+        scheduled.filter((t) => t.ms === 300).forEach((t) => t.cb());
+    });
+
+    assert.equal(document.getElementById("page-title").textContent, "P1");
+});
+
+test("pollState: sair do alerta com currentPage além do fim não trava a rotação", async () => {
+    const dash = loadApp();
+    const threePages = { refresh_seconds: 30, pages: [...ALERT_CONFIG.pages, { name: "P2", duration: 5, tiles: [] }] };
+
+    await withFakeSetTimeout(async (scheduled) => {
+        global.fetch = async (url) => ({
+            ok: true,
+            json: async () => (url.endsWith("/api/state") ? { alert: false } : threePages),
+        });
+        await dash.loadConfig();
+        dash.showPage(2);
+
+        global.fetch = fakeFetch(true);
+        await dash.pollState();
+        dash.showPage(2);  // estado preso na última página de 3
+        await dash.refreshConfig();  // agora só 2 páginas
+        scheduled.length = 0;
+
+        global.fetch = fakeFetch(false);
+        await dash.pollState();
+
+        assert.ok(scheduled.some((t) => t.ms === 5000));
+        scheduled.filter((t) => t.ms === 300).forEach((t) => t.cb());
+    });
+
+    assert.equal(document.getElementById("page-title").textContent, "P0");
+});

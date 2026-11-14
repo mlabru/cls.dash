@@ -33,6 +33,10 @@
 // backend (UNAVAILABLE_URL, o no_cast.png do 25.oflow); só se ela também
 // falhar o tile vira texto de erro.
 //
+// 2026.nov  mlabru  showPage normaliza o índice (o número de páginas muda a
+//                   cada refresh; sair do alerta com currentPage fora da
+//                   faixa parava a rotação) e cancela fades pendentes
+//
 // 2026.out  mlabru  endereço do backend derivado da página (resolveApiBase);
 //                   URL da mídia versionada pelo mtime (?v=); aviso dos
 //                   radares ocultos no cabeçalho; alerta prioritário
@@ -90,6 +94,8 @@ let config = null;         // última configuração recebida do backend
 let currentPage = 0;       // índice da página na tela, em config.pages
 let pageTimer = null;      // timer que troca para a próxima página
 let configTimer = null;    // timer da próxima atualização da configuração
+let renderTimer = null;    // fim do fade-out: troca os tiles (ver showPage)
+let titleTimer = null;     // fim do fade-out do título (ver updateTitle)
 let inAlert = false;       // alerta prioritário ativo (ver pollState)
 
 // < ENDEREÇO DO BACKEND >-------------------------------------------------------------
@@ -464,7 +470,11 @@ function updateTitle(page) {
 
     title.classList.remove("visible");
 
-    setTimeout(() => {
+    // um título pendente de uma troca anterior (< FADE_DURATION_MS atrás)
+    // escreveria o nome errado por cima deste
+    clearTimeout(titleTimer);
+
+    titleTimer = setTimeout(() => {
         title.textContent = inAlert ? ALERT_TITLE : page.name;
         title.classList.add("visible");
 
@@ -520,8 +530,12 @@ function scheduleNextPage(durationSeconds) {
 // ------------------------------------------------------------------------------------
 // mostra uma página: cancela a troca agendada, faz o fade-out, troca o
 // conteúdo (renderPage) e agenda a próxima página.
+//
+// o índice dá a volta na lista: o número de páginas muda a cada refresh
+// (radares de nowcast entram e saem), então um currentPage guardado antes
+// pode ter ficado fora da faixa (ex.: ao sair do alerta).
 // 
-// @param {number} index índice da página em config.pages
+// @param {number} index índice da página em config.pages (qualquer inteiro)
 //
 function showPage(index) {
 
@@ -530,13 +544,26 @@ function showPage(index) {
         pageTimer = null;
     }
 
-    const page = config.pages[index];
+    const pageCount = config.pages.length;
+
+    if (pageCount === 0) {
+        console.error("Configuração sem páginas: nada a exibir.");
+        return;
+    }
+
+    currentPage = ((index % pageCount) + pageCount) % pageCount;
+
+    const page = config.pages[currentPage];
     const dashboard = document.getElementById("dashboard");
 
     updateTitle(page);
 
     dashboard.classList.remove("dashboard--visible");
-    setTimeout(() => renderPage(page), FADE_DURATION_MS);
+
+    // sem isso, duas trocas em menos de FADE_DURATION_MS (ex.: alerta logo
+    // após a rotação) renderizariam a página anterior por cima da nova
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(() => renderPage(page), FADE_DURATION_MS);
 
     // em alerta a página fica presa na tela
     if (!inAlert) {

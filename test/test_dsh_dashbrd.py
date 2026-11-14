@@ -212,3 +212,24 @@ def test_notice_label_visible_only_on_page_with_hidden_radars(dashboard, tmp_pat
     dashboard.process_remote_command("GOTO 1", "127.0.0.1")
     assert not dashboard._lbl_notice.isHidden()
     assert dashboard._lbl_notice.text() == "Sem atualização há mais de 2 h: Radar Z (ZZZ)"
+
+
+@pytest.mark.parametrize("duration", [0, -1, None, "abc", float("nan")])
+def test_page_duration_invalid_falls_back_to_minimum(duration):
+    assert ad._page_duration({"duration": duration}) == ad.CF_MIN_PAGE_SECONDS
+
+
+def test_page_duration_valid_is_kept():
+    assert ad._page_duration({"duration": 15}) == 15.
+
+
+def test_zero_duration_page_does_not_crash_timer(dashboard, monkeypatch):
+    # duration 0 dividia por zero dentro do slot do timer (o PyQt5 aborta)
+    monkeypatch.setattr(gc, "CLST_PAGES", [{"duration": 0, "name": "Z", "tiles": []},
+                                           {"duration": 10, "name": "Y", "tiles": []}])
+    dashboard._show_page(0)
+    dashboard._page_start_time -= 2 * ad.CF_MIN_PAGE_SECONDS
+
+    dashboard._advance_page_timer()
+
+    assert dashboard._current_page_index == 1

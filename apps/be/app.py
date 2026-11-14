@@ -53,6 +53,9 @@ FLASK_DEBUG, MEDIA_MAX_AGE_HOURS, STSC_DATA, OFLOW_DATA, UNET_DATA,
 NOWCAST_MAX_AGE_HOURS, OFL_NO_CAST_IMAGE (as cinco últimas com os mesmos
 nomes do dashboard desktop).
 
+2026.nov  mlabru  validate_config valida toda página: "duration" número > 0
+                  (sem ela o frontend trocava de página a cada 0 ms) e, nas
+                  páginas comuns, "tiles" lista de objetos
 2026.out  mlabru  nowcast: uma página por radar, mosaico do 25.oflow na 1ª
                   linha e do 25.u-net na 2ª (sai NOWCAST_RADARS_PER_PAGE);
                   rota /media/nowcast/<origem>/<gif>; /health com
@@ -633,8 +636,48 @@ def validate_config(fdct_config: dict) -> None:
         raise ValueError(f"'media_dir' não encontrado ou não é um diretório: {ls_media_dir!r}")
 
     for ldct_page in llst_pages:
+        if not isinstance(ldct_page, dict):
+            raise ValueError(f"página inválida {ldct_page!r} (esperado um objeto).")
+
         if ldct_page.get("type") == CS_NOWCAST_PAGE_TYPE:
             _validate_nowcast_entry(ldct_page)
+
+        else:
+            _validate_regular_page(ldct_page)
+
+        _validate_duration(ldct_page)
+
+# -------------------------------------------------------------------------------------
+def _validate_duration(fdct_page: dict) -> None:
+    """
+    sem "duration" positiva o frontend agenda a próxima página para 0 ms
+    (setTimeout(NaN)) e o navegador fica trocando de página sem parar.
+
+    :param fdct_page: uma página do config.json
+    :raises ValueError: "duration" ausente, não numérica ou <= 0
+    """
+    lf_duration = fdct_page.get("duration")
+
+    # bool é subclasse de int: "duration": true não pode passar
+    if (isinstance(lf_duration, bool) or not isinstance(lf_duration, (int, float))
+            or not math.isfinite(lf_duration) or lf_duration <= 0):
+        raise ValueError(f"página {fdct_page.get('name')!r}: 'duration' deve ser um "
+                         f"número positivo (veio {lf_duration!r}).")
+
+# -------------------------------------------------------------------------------------
+def _validate_regular_page(fdct_page: dict) -> None:
+    """
+    confere uma página comum (não nowcast) do config.json.
+
+    :param fdct_page: a página
+    :raises ValueError: "tiles" não é uma lista de objetos
+    """
+    llst_tiles = fdct_page.get("tiles")
+
+    if not isinstance(llst_tiles, list) or not all(isinstance(l_tile, dict)
+                                                   for l_tile in llst_tiles):
+        raise ValueError(f"página {fdct_page.get('name')!r}: 'tiles' deve ser uma lista "
+                         "de objetos.")
 
 # -------------------------------------------------------------------------------------
 def _validate_nowcast_entry(fdct_entry: dict) -> None:

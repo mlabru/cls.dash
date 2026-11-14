@@ -76,6 +76,29 @@ def test_validate_config_missing_media_dir(tmp_path):
         })
 
 
+@pytest.mark.parametrize("duration", [None, 0, -5, "15", True, float("nan")])
+def test_validate_config_rejects_bad_duration(media_dir, duration):
+    page = {"name": "x", "tiles": []}
+    if duration is not None:
+        page["duration"] = duration
+    with pytest.raises(ValueError, match="'duration'"):
+        be_app.validate_config({"media_dir": str(media_dir), "pages": [page]})
+
+
+@pytest.mark.parametrize("tiles", [None, "a.png", [["t", "a.png"]]])
+def test_validate_config_rejects_bad_tiles(media_dir, tiles):
+    page = {"name": "x", "duration": 1}
+    if tiles is not None:
+        page["tiles"] = tiles
+    with pytest.raises(ValueError, match="'tiles'"):
+        be_app.validate_config({"media_dir": str(media_dir), "pages": [page]})
+
+
+def test_validate_config_rejects_non_object_page(media_dir):
+    with pytest.raises(ValueError, match="página inválida"):
+        be_app.validate_config({"media_dir": str(media_dir), "pages": ["x"]})
+
+
 def test_validate_config_accepts_valid_config(media_dir):
     be_app.validate_config({
         "media_dir": str(media_dir),
