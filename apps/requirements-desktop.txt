@@ -1,0 +1,6 @@
+# dashboard desktop (apps/dashViewQt.py) e control pad (apps/dashCtrlPad.py)
+#
+# o wheel do PyQt5 já traz QtMultimedia (tiles MP4); tocar o vídeo depende
+# ainda dos plugins do GStreamer do sistema (Debian: gstreamer1.0-plugins-good,
+# gstreamer1.0-libav). O dshcore (apps/dshcore) só usa a biblioteca padrão.
+PyQt5>=5.15

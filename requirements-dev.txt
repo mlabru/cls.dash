@@ -1,0 +1,9 @@
+# ambiente de testes completo (o "pytest" da raiz roda as suítes do backend
+# e do desktop numa sessão só; ver pytest.ini):
+#
+#   python3 -m venv ~/.venv && ~/.venv/bin/pip install -r requirements-dev.txt
+#   ~/.venv/bin/python3 -m pytest
+#
+# o frontend (apps/fe) tem os próprios testes, no node: cd apps/fe && node --test
+-r apps/be/requirements-dev.txt
+-r apps/requirements-desktop.txt
