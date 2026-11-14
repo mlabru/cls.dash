@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard STSC</title>
+
+    <!-- ?v=: http.server não manda Cache-Control e o navegador reusa o
+         app.js/style.css velhos após um deploy; troque a versão ao alterá-los -->
+    <link rel="stylesheet" href="style.css?v=2026.10.14">
+</head>
+
+<body>
+
+    <header id="page-header">
+        <span id="page-title"></span>
+        <span id="page-notice"></span>
+    </header>
+
+    <div id="dashboard"></div>
+
+    <div id="progress-bar">
+        <div id="progress-fill"></div>
+    </div>
+
+    <!-- backend em outra máquina/porta: descomente e ajuste (ver resolveApiBase em app.js)
+    <script>window.DASH_API_BASE = "http://servidor:8000";</script>
+    -->
+    <script src="app.js?v=2026.10.14"></script>
+
+</body>
+</html>

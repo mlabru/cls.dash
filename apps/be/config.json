@@ -1,0 +1,66 @@
+{
+  "media_dir": "./media",
+  "refresh_seconds": 10,
+
+  "pages": [
+    {
+      "name": "Monitor de Recepção de Dados Radar",
+      "duration": 20,
+
+      "tiles": [
+        {
+          "type": "image",
+          "file": "rsm_out.png"
+        }
+      ]
+    },
+
+    {
+      "name": "Monitoramento de Raios",
+      "duration": 15,
+
+      "tiles": [
+        {
+          "type": "image",
+          "file": "slm_now.png",
+          "title": "Situação Atual (atualizado a cada 10 min)"
+        },
+
+        {
+          "type": "video",
+          "file": "slm_out.mp4",
+          "title": "Nowcast (30 minutos)"
+        }
+      ]
+    },
+
+    {
+      "name": "NOAA GOES-East",
+      "duration": 20,
+
+      "tiles": [
+        {
+          "type": "video",
+          "file": "goes1913.mp4",
+          "title": "Canal 13 (Infravermelho longa onda)"
+        }
+      ]
+    },
+
+    {
+      "type": "nowcast",
+      "name": "Nowcast Radar 400 km",
+      "duration": 20,
+
+      "radars": [
+        ["BEL", "Belém"],
+        ["BVA", "Boa Vista"],
+        ["CGU", "Canguçu"],
+        ["MDI", "Morro da Igreja"],
+        ["PCO", "Pico do Couto"],
+        ["SRO", "São Roque"],
+        ["STI", "Santiago"]
+      ]
+    }
+  ]
+}

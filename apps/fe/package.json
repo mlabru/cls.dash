@@ -1,0 +1,12 @@
+{
+  "name": "dash-fe",
+  "private": true,
+  "version": "1.0.0",
+  "description": "frontend estático do dashboard web (apps/fe)",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}
