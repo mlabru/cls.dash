@@ -31,6 +31,9 @@
 #   algum par falhou.  Uma queda do host de cálculo não precisa de lógica
 #   aqui: os GIFs envelhecem e os dashboards mostram "indisponível".
 #
+# 2026.nov  mlabru  CLS_LIB obrigatória (passo 2): sai o symlink cls_common.sh
+#                   da raiz do repo; sem cls.env/CLS_LIB, erro explícito
+#
 # 2026.nov  mlabru  initial version (divisão host de cálculo × host de exibição)
 
 # depends on: bash, rsync, ssh, flock, dsh_common.sh, cls_common.sh
@@ -43,9 +46,15 @@ set -euo pipefail
 LS_SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # REPO_ROOT, RUN_DIR, LOG_DIR (dsh_common.sh) e check_log_size/cls_log
-# (cls_common.sh, de CLS_LIB ou do symlink ao lado; comum aos projetos cls)
+# (cls_common.sh, de CLS_LIB, do cls.env; comum aos projetos cls)
 source "${LS_SCRIPT_DIR}/dsh_common.sh"
-source "${CLS_LIB:-${LS_SCRIPT_DIR}}/cls_common.sh"
+# CLS_LIB (cls.env) é obrigatória: sem ela não há cls_common.sh -- falha
+# aqui, com a causa, em vez de num "command not found" mais adiante
+if [ ! -r "${CLS_LIB:-}/cls_common.sh" ]; then
+    echo "[error]: CLS_LIB='${CLS_LIB:-}' sem cls_common.sh; defina-a no cls.env (${CLS_ENV_FILE:-~/.config/cls/cls.env})" >&2
+    exit 1
+fi
+source "${CLS_LIB}/cls_common.sh"
 
 # host de cálculo ([usuário@]host); obrigatório
 DASH_SYNC_HOST="${DASH_SYNC_HOST:-}"

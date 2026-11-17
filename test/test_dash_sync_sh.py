@@ -3,7 +3,7 @@ test_dash_sync_sh
 
 testes do dash_sync.sh (host de exibição puxa os produtos do host de cálculo).
 
-O script roda numa cópia em tmp_path (com dsh_common.sh e cls_common.sh), então
+O script roda numa cópia em tmp_path (com dsh_common.sh; cls_common.sh vem de CLS_LIB), então
 data/run e logs/ ficam no tmp.  O ssh é falso: descarta as opções e o host e
 roda o comando "remoto" localmente, de modo que o rsync é o real (mtime,
 exclusões e padrões testados de verdade).  Um rsync de fachada na frente do
@@ -62,8 +62,7 @@ def sandbox(tmp_path):
     l_repo = tmp_path / "repo"
     l_repo.mkdir()
 
-    for ls_name in ("dash_sync.sh", "dsh_common.sh", "cls_common.sh"):
-        # resolve o symlink do cls_common.sh
+    for ls_name in ("dash_sync.sh", "dsh_common.sh"):
         shutil.copy((CPTH_REPO / ls_name).resolve(), l_repo / ls_name)
 
     l_bin = tmp_path / "bin"

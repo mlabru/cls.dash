@@ -1,4 +1,5 @@
 import os
+import pathlib
 import sys
 
 # põe apps/ no sys.path: permite "import widgets.xxx" e "import dash.xxx"
@@ -32,4 +33,10 @@ def hidden_radars_state_in_process(monkeypatch):
 # a suíte não depende do cls.env de quem a roda (~/.config/cls/cls.env): os
 # scripts shell testados herdam este ambiente e não carregam nada de lá
 os.environ["CLS_ENV_FILE"] = os.devnull
+
+# cls_common.sh: CLS_LIB do ambiente ou, no checkout de desenvolvimento, o
+# repo cls.common irmão (<raiz>/cls.common, com o projeto em
+# <raiz>/<nn>.<proj>/cls.<proj>)
+os.environ.setdefault("CLS_LIB", str(pathlib.Path(__file__).resolve().parents[3]
+                                     / "cls.common" / "bash"))
 
