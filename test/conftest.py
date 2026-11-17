@@ -28,3 +28,8 @@ def hidden_radars_state_in_process(monkeypatch):
     monkeypatch.setattr(dsc_nowcast, "G_HIDDEN_STATE_FILE", None)
     monkeypatch.setattr(dsc_nowcast, "G_HIDDEN_RADARS", set())
     monkeypatch.setattr(dsc_nowcast, "G_HIDDEN_STATE_TOKEN", None)
+
+# a suíte não depende do cls.env de quem a roda (~/.config/cls/cls.env): os
+# scripts shell testados herdam este ambiente e não carregam nada de lá
+os.environ["CLS_ENV_FILE"] = os.devnull
+

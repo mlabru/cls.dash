@@ -8,6 +8,13 @@
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ambiente da instalação (cls.env: CLS_LIB e sobreposições), carregado
+# antes dos padrões abaixo; "set -a" exporta para os programas Python.
+# Precedência: ambiente do processo > cls.env > padrões deste arquivo (ver
+# cls.common/etc/cls.env.example)
+CLS_ENV_FILE="${CLS_ENV_FILE:-${HOME:-}/.config/cls/cls.env}"
+if [ -r "${CLS_ENV_FILE}" ]; then set -a; source "${CLS_ENV_FILE}"; set +a; fi
+
 RUN_DIR="$REPO_ROOT/data/run"
 LOG_DIR="$REPO_ROOT/logs"
 APPS_DIR="$REPO_ROOT/apps"

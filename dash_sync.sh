@@ -42,10 +42,10 @@ set -euo pipefail
 # diretório deste script
 LS_SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# REPO_ROOT, RUN_DIR, LOG_DIR (dsh_common.sh) e check_log_size/met_log
-# (cls_common.sh, symlink compartilhado pelos projetos met)
+# REPO_ROOT, RUN_DIR, LOG_DIR (dsh_common.sh) e check_log_size/cls_log
+# (cls_common.sh, de CLS_LIB ou do symlink ao lado; comum aos projetos cls)
 source "${LS_SCRIPT_DIR}/dsh_common.sh"
-source "${LS_SCRIPT_DIR}/cls_common.sh"
+source "${CLS_LIB:-${LS_SCRIPT_DIR}}/cls_common.sh"
 
 # host de cálculo ([usuário@]host); obrigatório
 DASH_SYNC_HOST="${DASH_SYNC_HOST:-}"
@@ -91,7 +91,7 @@ DASH_SYNC_LOG_ERR="${LOG_DIR}/dash_sync.err"
 #
 log()
 {
-    met_log "${DASH_SYNC_LOG_APP}" "${DASH_SYNC_LOG_ERR}" "$@"
+    cls_log "${DASH_SYNC_LOG_APP}" "${DASH_SYNC_LOG_ERR}" "$@"
 
 } # log
 
